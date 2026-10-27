@@ -33,9 +33,12 @@ use crate::i18n::{t, tf};
 use crate::studio::Studio;
 use crate::ui::{Agent, AgentRow, App};
 
-/// The tools the agent may call: the editor's, and nothing of the
-/// machine's - no shell, no files.
+/// The tools the agent may call: the editor's, and of the machine's only
+/// `codex exec`, for pictures - no other command, no files.
 const ALLOWED: &str = "mcp__concat";
+/// The one shell command allowed, by Claude Code's permission rule; any
+/// other, or one chained after it, is refused without asking.
+const CODEX_RULE: &str = "Bash(codex exec:*)";
 
 /// How much of a tool's input or a failure is shown under its row.
 const DETAIL_CHARS: usize = 160;
@@ -46,8 +49,19 @@ The project open on screen is at {path}. Work on it with the concat tools: call 
 project_open with that path first, then edit it. Every edit lands in the editor's \
 undo history while the user watches, so make edits one meaningful step at a time. \
 Use timeline_read to see what is there and preview_frame to look at the result \
-when it helps. Keep replies short and plain, and reply in the language the user \
-writes in (Thai or English).";
+when it helps. The editor saves every edit on its own: never call project_save \
+or project_close, and do not tell the user to save. Keep replies short and plain, \
+and reply in the language the user writes in (Thai or English).";
+
+/// Added to [`BRIEF`] when Codex is installed: how to make a picture.
+const CODEX_BRIEF: &str = " To make a picture - a background, a cover, an \
+illustration, a frame for a title - run Codex in Bash, exactly in this form and \
+as the whole command: codex exec --skip-git-repo-check --sandbox workspace-write \
+--ephemeral{model} -C '{path}' \"Generate an image: <what to draw>, <aspect ratio \
+of the project's frame>. Save it as generated/<short-name>.png in the current \
+directory. Reply with only the saved file's path.\" It takes about a minute. \
+Then import the file with media_import and place it with clip_add. Bash runs \
+nothing but codex exec.";
 
 /// One thing the process said, as the sidebar cares about it.
 #[derive(Clone, Debug, PartialEq)]
@@ -253,21 +267,40 @@ fn start(studio: &mut Studio, text: &str) -> Result<(), String> {
         .as_ref()
         .map(|session| session.path().to_owned())
         .ok_or_else(|| tf("agent.couldNotStart", &[&"no project is open"]))?;
-    let claude = find_claude().ok_or_else(|| t("agent.notFound"))?;
+    let claude = find("claude").ok_or_else(|| t("agent.notFound"))?;
     let (address, token) = reach(studio).map_err(|why| tf("agent.noServer", &[&why]))?;
     let config = write_mcp_config(&studio.host.dirs.config, &address, &token)
         .map_err(|why| tf("agent.couldNotStart", &[&why]))?;
 
+    let mut brief = BRIEF.replace("{path}", &project);
     let mut command = Command::new(&claude);
     command
         .args(["-p", "--output-format", "stream-json", "--verbose"])
         .arg("--strict-mcp-config")
         .arg("--mcp-config")
-        .arg(&config)
-        .args(["--tools", ""])
-        .args(["--allowedTools", ALLOWED])
-        .arg("--append-system-prompt")
-        .arg(BRIEF.replace("{path}", &project));
+        .arg(&config);
+    if find("codex").is_some() {
+        // A model named for Codex, where the user's own default is one
+        // their sign-in cannot use.
+        let model = std::env::var("CONCAT_CODEX_MODEL")
+            .ok()
+            .filter(|model| !model.trim().is_empty())
+            .map(|model| format!(" -m {}", model.trim()))
+            .unwrap_or_default();
+        brief.push_str(
+            &CODEX_BRIEF
+                .replace("{path}", &project)
+                .replace("{model}", &model),
+        );
+        command
+            .args(["--tools", "Bash"])
+            .args(["--allowedTools", ALLOWED, CODEX_RULE]);
+    } else {
+        command
+            .args(["--tools", ""])
+            .args(["--allowedTools", ALLOWED]);
+    }
+    command.arg("--append-system-prompt").arg(brief);
     if let Some(session) = &studio.agent.session {
         command.arg("--resume").arg(session);
     }
@@ -373,11 +406,29 @@ pub fn parse(line: &str) -> Vec<Said> {
             .iter()
             .filter_map(|block| match block["type"].as_str() {
                 Some("text") => Some(Said::Text(block["text"].as_str()?.to_owned())),
-                Some("tool_use") => Some(Said::Tool {
-                    id: block["id"].as_str()?.to_owned(),
-                    name: block["name"].as_str()?.to_owned(),
-                    input: summary(&block["input"]),
-                }),
+                Some("tool_use") => {
+                    let name = block["name"].as_str()?;
+                    let input = &block["input"];
+                    // A shell call is named by its program and shown by
+                    // what it asks for, not by the command line.
+                    let (name, input) = match input["command"].as_str() {
+                        Some(command) if name == "Bash" => (
+                            command.split_whitespace().next().unwrap_or(name).to_owned(),
+                            clip(
+                                input["description"]
+                                    .as_str()
+                                    .or_else(|| quoted(command))
+                                    .unwrap_or(command),
+                            ),
+                        ),
+                        _ => (name.to_owned(), summary(input)),
+                    };
+                    Some(Said::Tool {
+                        id: block["id"].as_str()?.to_owned(),
+                        name,
+                        input,
+                    })
+                }
                 _ => None,
             })
             .collect(),
@@ -436,6 +487,14 @@ fn result_text(content: &Value) -> String {
             .join("\n"),
         _ => String::new(),
     }
+}
+
+/// The first double-quoted part of a command line: what a `codex exec`
+/// was asked to do.
+fn quoted(command: &str) -> Option<&str> {
+    let start = command.find('"')? + 1;
+    let length = command[start..].find('"')?;
+    Some(&command[start..start + length])
 }
 
 /// `mcp__concat__clip_trim` as "clip trim".
@@ -513,9 +572,9 @@ fn write_mcp_config(folder: &Path, address: &str, token: &str) -> Result<PathBuf
     Ok(path)
 }
 
-/// The folders `claude` is looked for in: the PATH this process was given,
-/// then where its installers put it, since an app opened from the Finder
-/// is not given the shell's PATH.
+/// The folders a program is looked for in: the PATH this process was
+/// given, then where installers put `claude` and `codex`, since an app
+/// opened from the Finder is not given the shell's PATH.
 fn search_dirs() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|path| std::env::split_paths(&path).collect())
@@ -523,20 +582,33 @@ fn search_dirs() -> Vec<PathBuf> {
     if let Some(home) = std::env::var_os("HOME").map(PathBuf::from) {
         dirs.push(home.join(".local/bin"));
         dirs.push(home.join(".claude/local"));
+        // nvm's Node versions, newest first: where `npm i -g` put codex.
+        let mut versions: Vec<PathBuf> = std::fs::read_dir(home.join(".nvm/versions/node"))
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .map(|entry| entry.path().join("bin"))
+                    .collect()
+            })
+            .unwrap_or_default();
+        versions.sort();
+        dirs.extend(versions.into_iter().rev());
     }
     dirs.push("/opt/homebrew/bin".into());
     dirs.push("/usr/local/bin".into());
     dirs
 }
 
-/// The user's `claude`, or `CONCAT_CLAUDE` where that names another.
-fn find_claude() -> Option<PathBuf> {
-    if let Some(named) = std::env::var_os("CONCAT_CLAUDE").map(PathBuf::from) {
+/// The program `name`, or for `claude` the one `CONCAT_CLAUDE` names.
+fn find(name: &str) -> Option<PathBuf> {
+    if name == "claude"
+        && let Some(named) = std::env::var_os("CONCAT_CLAUDE").map(PathBuf::from)
+    {
         return named.is_file().then_some(named);
     }
     search_dirs()
         .into_iter()
-        .map(|dir| dir.join("claude"))
+        .map(|dir| dir.join(name))
         .find(|candidate| candidate.is_file())
 }
 
@@ -586,6 +658,16 @@ mod tests {
         assert_eq!(
             parse(r#"{"session_id":"s1","type":"result","is_error":false,"result":"Done."}"#),
             vec![Said::Session("s1".to_owned()), Said::Finished(None)]
+        );
+        assert_eq!(
+            parse(
+                r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"codex exec -C '/p' \"Generate an image: a red sky\""}}]}}"#
+            ),
+            vec![Said::Tool {
+                id: "t2".to_owned(),
+                name: "codex".to_owned(),
+                input: "Generate an image: a red sky".to_owned(),
+            }]
         );
         assert!(parse(r#"{"type":"rate_limit_event"}"#).is_empty());
         assert!(parse("not json").is_empty());

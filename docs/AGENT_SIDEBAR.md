@@ -57,15 +57,23 @@ The sidebar (`ui/agent.slint`, `src/agent.rs`) runs the user's installed
 ```sh
 claude -p --output-format stream-json --verbose \
   --strict-mcp-config --mcp-config <config>/agent-mcp.json \
-  --tools "" --allowedTools mcp__concat \
+  --tools Bash --allowedTools mcp__concat "Bash(codex exec:*)" \
   --append-system-prompt "<where the project is, how to work>" \
   [--resume <session id>]
 ```
 
 - **No API key in the app**: it uses the user's own Claude login.
-- **Only the editor's tools**: `--tools ""` takes away the shell and file
-  tools, and `--strict-mcp-config` the user's other MCP servers, so the
-  agent can do nothing but edit (and nothing needs an approval yet).
+- **Only the editor's tools, and Codex**: `--strict-mcp-config` keeps the
+  user's other MCP servers out. When `codex` is installed (the PATH,
+  `~/.local/bin`, nvm, Homebrew), the agent gets Bash with one permission
+  rule, `Bash(codex exec:*)`, so `codex exec` is the only command it can run;
+  anything else, or chained after it, is refused without asking. Without
+  Codex, `--tools ""` takes the shell away altogether.
+- **Pictures**: the brief tells the agent to run `codex exec --sandbox
+  workspace-write -C <project> "Generate an image: ... Save it as
+  generated/<name>.png"` (about a minute an image), then `media_import` and
+  `clip_add`. `CONCAT_CODEX_MODEL` adds `-m <model>`, for a Codex config
+  whose default model the user's sign-in cannot use.
 - **The server**: `agent-mcp.json` (mode 600, it holds the token) points
   `concat --mcp window` at the Automation page's server when it is on, or at
   one the sidebar starts on a free loopback port for itself.
