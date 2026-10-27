@@ -219,6 +219,53 @@ impl OpenProjects {
     }
 }
 
+/// One call on the project a window has open, for the window to run
+/// through its own session: what the API asks of a project that is
+/// [`Holder::Window`]'s once the window has gone live ([`Api::go_live`]).
+pub enum LiveCall {
+    /// The project as it stands.
+    View,
+    /// The document as it would be saved.
+    Document,
+    /// One edit, as one step of the window's undo history.
+    Apply(Box<Command>),
+    /// The window's undo.
+    Undo,
+    /// The window's redo.
+    Redo,
+    /// The window's save.
+    Save,
+    /// The active timeline's frame and rate, as an edit.
+    SetVideo(VideoSettings),
+    /// A copy of the edit with no history, for a frame or an export to
+    /// read on the API's thread.
+    Detach,
+}
+
+/// The window's answer to a [`LiveCall`].
+pub enum LiveReply {
+    /// [`LiveCall::View`], and every edit's new state.
+    View(EditorView),
+    /// [`LiveCall::Document`].
+    Document(serde_json::Value),
+    /// [`LiveCall::Save`].
+    Done,
+    /// [`LiveCall::Detach`].
+    Detached(Box<Session>),
+}
+
+/// A window that runs the API's calls on the project it has open ("live
+/// mode", #337): an agent edits what is on screen, each edit one step of
+/// the window's undo history, the preview and timeline following as it
+/// goes, and the two never saving over each other since there is one
+/// session. Called on the API's thread; the window answers on its own and
+/// this waits.
+pub trait LiveWindow: Send + Sync {
+    /// Runs `call` on the project at `path`, or says why not: the window
+    /// has closed, or has another project open by now.
+    fn run(&self, path: &str, call: LiveCall) -> Result<LiveReply, ApiError>;
+}
+
 /// The dispatcher: the open sessions and the services behind them.
 pub struct Api {
     dirs: AppDirs,
@@ -243,6 +290,9 @@ pub struct Api {
     book: Arc<job::Book>,
     /// [`VersionInfo::capabilities`], in the order they were added.
     capabilities: Vec<String>,
+    /// The window this API is embedded in, once it runs the calls on the
+    /// project it has open; see [`LiveWindow`].
+    live: Option<Arc<dyn LiveWindow>>,
 }
 
 /// A way to stop the jobs of one [`Api`] from any thread, without waiting
@@ -302,6 +352,7 @@ impl Api {
             jobs: Jobs::default(),
             dirs,
             capabilities: CAPABILITIES.iter().map(|name| (*name).to_owned()).collect(),
+            live: None,
         }
     }
 
@@ -355,6 +406,15 @@ impl Api {
     /// round.
     pub fn share_open_projects(&mut self, open: OpenProjects) {
         self.open = open;
+    }
+
+    /// Hands the calls on a project `window` has open to `window`, where
+    /// they were refused before: the window's register must be this
+    /// API's too ([`Api::share_open_projects`]), since it is how a project
+    /// is known to be the window's. Adds the "live" capability.
+    pub fn go_live(&mut self, window: Arc<dyn LiveWindow>) {
+        self.live = Some(window);
+        self.add_capability("live");
     }
 
     /// Confines every write to `roots`: from here on a created project, an
@@ -430,6 +490,99 @@ impl Api {
     }
 
     fn run(&mut self, request: Request) -> Result<Reply, ApiError> {
+        match self.window_for(&request) {
+            Some((window, path)) => self.run_live(window.as_ref(), &path, request),
+            None => self.run_here(request),
+        }
+    }
+
+    /// The live window and the project's folder, when `request` is about
+    /// a project that window has open.
+    fn window_for(&self, request: &Request) -> Option<(Arc<dyn LiveWindow>, String)> {
+        let window = self.live.clone()?;
+        let path = match request {
+            Request::ProjectOpen { path }
+            | Request::ProjectClose { path, .. }
+            | Request::ProjectGet { path }
+            | Request::ProjectDocument { path }
+            | Request::ProjectSave { path, .. }
+            | Request::ProjectSetVideo { path, .. }
+            | Request::EditApply { path, .. }
+            | Request::EditUndo { path }
+            | Request::EditRedo { path }
+            | Request::MediaImport { path, .. }
+            | Request::TemplateSave { path, .. }
+            | Request::ExportRun { path, .. }
+            | Request::PreviewFrame { path, .. } => path,
+            _ => return None,
+        };
+        (self.open.holder(path) == Some(Holder::Window)).then(|| (window, path.clone()))
+    }
+
+    /// `request` on the project the window has open, through the window.
+    /// Opening and closing it are no-ops here: it is the window's to open
+    /// and close, and a close that asks for a save gets one.
+    fn run_live(
+        &mut self,
+        window: &dyn LiveWindow,
+        path: &str,
+        request: Request,
+    ) -> Result<Reply, ApiError> {
+        let view = |reply: LiveReply| match reply {
+            LiveReply::View(view) => Ok(Reply::View(Box::new(view))),
+            _ => Err(out_of_turn()),
+        };
+        match request {
+            Request::ProjectOpen { .. } | Request::ProjectGet { .. } => {
+                view(window.run(path, LiveCall::View)?)
+            }
+            Request::ProjectClose { save, .. } => {
+                if save {
+                    window.run(path, LiveCall::Save)?;
+                }
+                Ok(Reply::Done(Done {}))
+            }
+            Request::ProjectDocument { .. } => match window.run(path, LiveCall::Document)? {
+                LiveReply::Document(document) => Ok(Reply::Document(document)),
+                _ => Err(out_of_turn()),
+            },
+            Request::ProjectSave { name: Some(_), .. } => Err(ApiError::new(
+                ErrorCode::Refused,
+                format!("{path} is open in the window: rename it there"),
+            )),
+            Request::ProjectSave { .. } => {
+                window.run(path, LiveCall::Save)?;
+                Ok(Reply::Done(Done {}))
+            }
+            Request::ProjectSetVideo { video, .. } => {
+                view(window.run(path, LiveCall::SetVideo(video))?)
+            }
+            Request::EditApply { command, .. } => view(window.run(path, LiveCall::Apply(command))?),
+            Request::EditUndo { .. } => view(window.run(path, LiveCall::Undo)?),
+            Request::EditRedo { .. } => view(window.run(path, LiveCall::Redo)?),
+            // The probe here, off the window's thread; the add there.
+            Request::MediaImport { file, .. } => {
+                let item = media::probe(&file)
+                    .map_err(ApiError::failed)?
+                    .to_new_media();
+                view(window.run(path, LiveCall::Apply(Box::new(Command::AddMedia { item })))?)
+            }
+            // Readers of the whole edit: run here on a copy of it, held as
+            // a session just for the call.
+            request => {
+                let LiveReply::Detached(copy) = window.run(path, LiveCall::Detach)? else {
+                    return Err(out_of_turn());
+                };
+                let key = key_of(path);
+                self.sessions.insert(key.clone(), *copy);
+                let outcome = self.run_here(request);
+                self.sessions.remove(&key);
+                outcome
+            }
+        }
+    }
+
+    fn run_here(&mut self, request: Request) -> Result<Reply, ApiError> {
         let view = |view: EditorView| Ok(Reply::View(Box::new(view)));
         match request {
             Request::Version => Ok(Reply::Version(self.version())),
@@ -551,7 +704,7 @@ impl Api {
             // go through that window instead of around it.
             let how = match &refusal {
                 Refusal::Elsewhere(owner) if owner.role == "window" => {
-                    ". To work on it from an agent, turn on Settings > Automation in that window and run the agent with `concat --mcp window`; the project on screen stays the window's until live mode lands"
+                    ". To work on it from an agent, turn on Settings > Automation in that window and run the agent with `concat --mcp window`, which edits it in the window"
                 }
                 Refusal::Elsewhere(_) => ". Close it there first",
                 Refusal::Here(_) => "",
@@ -1141,6 +1294,11 @@ fn not_open(path: &str) -> ApiError {
         ErrorCode::NotOpen,
         format!("{path} is not open - open it first"),
     )
+}
+
+/// A window that answered a [`LiveCall`] with the wrong kind of reply.
+fn out_of_turn() -> ApiError {
+    ApiError::failed("the window answered a different call")
 }
 
 /// The edit layer's no, as the code that says so.
@@ -1747,6 +1905,120 @@ mod tests {
         }));
         assert_eq!(open.holder(&path), None, "closing gives it back");
         assert!(!Path::new(&path).join(lock::FILE).exists(), "lock and all");
+    }
+
+    /// A window gone live, as the API meets one: the window's session
+    /// behind a lock, run the way the window runs it.
+    struct Window(Mutex<Session>);
+
+    impl LiveWindow for Window {
+        fn run(&self, path: &str, call: LiveCall) -> Result<LiveReply, ApiError> {
+            let mut session = self.0.lock().expect("session");
+            assert_eq!(key_of(path), key_of(session.path()));
+            Ok(match call {
+                LiveCall::View => LiveReply::View(session.view()),
+                LiveCall::Document => LiveReply::Document(session.document()),
+                LiveCall::Apply(command) => {
+                    LiveReply::View(session.apply(*command).map_err(refused)?)
+                }
+                LiveCall::Undo => LiveReply::View(session.undo()),
+                LiveCall::Redo => LiveReply::View(session.redo()),
+                LiveCall::Save => {
+                    session.save(None).map_err(ApiError::failed)?;
+                    LiveReply::Done
+                }
+                LiveCall::SetVideo(video) => {
+                    LiveReply::View(session.set_video(video).map_err(refused)?)
+                }
+                LiveCall::Detach => LiveReply::Detached(Box::new(session.detached())),
+            })
+        }
+    }
+
+    #[test]
+    fn a_live_window_runs_the_calls_on_its_project() {
+        let (mut api, scratch, _events) = api();
+        let path = project(&mut api, &scratch, "Live");
+        ok(api.dispatch(Request::ProjectClose {
+            path: path.clone(),
+            save: false,
+        }));
+        let open = OpenProjects::default();
+        api.share_open_projects(open.clone());
+        let info = projects::open(&path).expect("manifest");
+        open.claim(&path, Holder::Window)
+            .expect("the window has it");
+        let window = Arc::new(Window(Mutex::new(
+            Session::open_info(&info).expect("session"),
+        )));
+        api.go_live(window.clone());
+        match ok(api.dispatch(Request::Version)) {
+            Reply::Version(version) => assert!(version.capabilities.contains(&"live".to_owned())),
+            _ => panic!("not a version"),
+        }
+
+        ok(api.dispatch(Request::ProjectOpen { path: path.clone() }));
+        let added = view(ok(api.dispatch(Request::EditApply {
+            path: path.clone(),
+            command: Box::new(Command::AddTextClip {
+                above: false,
+                track_id: None,
+                start: 0.0,
+                style: None,
+                duration: Some(3.0),
+                offset_y: None,
+            }),
+        })));
+        assert_eq!(added.project.active().clips.len(), 1);
+        {
+            let session = window.0.lock().expect("session");
+            assert_eq!(
+                session.project().active().clips.len(),
+                1,
+                "the window's edit"
+            );
+            assert!(session.can_undo(), "one step of its history");
+        }
+        assert!(api.sessions.is_empty(), "and no session of the API's own");
+
+        let picture = ok(api.dispatch(Request::PreviewFrame {
+            path: path.clone(),
+            time: 1.0,
+            output: None,
+            width: Some(16),
+            height: Some(9),
+        }));
+        assert!(matches!(picture, Reply::Picture(_)), "drawn from a copy");
+        assert!(api.sessions.is_empty(), "the copy gone with the call");
+
+        let undone = view(ok(api.dispatch(Request::EditUndo { path: path.clone() })));
+        assert!(undone.project.active().clips.is_empty());
+        assert!(
+            window
+                .0
+                .lock()
+                .expect("session")
+                .project()
+                .active()
+                .clips
+                .is_empty(),
+            "the window's undo"
+        );
+
+        let renamed = err(api.dispatch(Request::ProjectSave {
+            path: path.clone(),
+            name: Some("Other".to_owned()),
+        }));
+        assert_eq!(renamed.code, ErrorCode::Refused);
+        ok(api.dispatch(Request::ProjectClose {
+            path: path.clone(),
+            save: false,
+        }));
+        assert_eq!(
+            open.holder(&path),
+            Some(Holder::Window),
+            "closing leaves it the window's"
+        );
     }
 
     /// Two registers are two processes as far as the lock goes: an API

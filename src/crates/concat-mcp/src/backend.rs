@@ -6,16 +6,14 @@
 //!
 //! Both take a [`Request`] and give back its result as JSON, so a tool
 //! cannot tell them apart and the meaning of every request stays the
-//! API's. A third backend - the window's own open project, once the
-//! window can be asked to edit it ("live mode", #337) - is one more
-//! implementation of [`Backend`], with nothing above it changing.
+//! API's.
 //!
 //! - [`Window`]: a JSON-RPC connection to the server the Automation page
 //!   runs. Found through the listing the window writes
 //!   (`concat_server::discovery`) or named by `CONCAT_API_ADDRESS` and
 //!   `CONCAT_API_TOKEN`. Goes through the window's register of open
-//!   projects, so the project on screen cannot be opened here and saved
-//!   over, and through its one export slot.
+//!   projects, so a call on the project on screen is run by the window as
+//!   its own edit ("live mode", #337), and through its one export slot.
 //! - [`Headless`]: an [`Api`] in this process, writing under the user's
 //!   home (or `CONCAT_MCP_ROOTS`). Nothing to start first, and nothing
 //!   shared with a window: a project open in the window can be opened here

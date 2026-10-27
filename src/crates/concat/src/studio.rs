@@ -46,6 +46,7 @@ use concat_project::{Command, PlayheadSide};
 
 mod backdrop;
 mod consolidate;
+pub(crate) mod live;
 use consolidate::MergeJob;
 mod masking;
 use masking::{MaskFrame, MaskGrip};
@@ -2810,6 +2811,22 @@ impl Studio {
     }
 
     pub fn apply(&mut self, command: Command) -> Option<String> {
+        match self.try_apply(command)? {
+            Ok(view) => view.created_id,
+            Err(error) => {
+                self.notify(&error, true);
+                None
+            }
+        }
+    }
+
+    /// [`Studio::apply`], with the edit layer's no handed back rather than
+    /// said: for a caller that says it itself, as the API does in live
+    /// mode. `None` when no project is open.
+    fn try_apply(
+        &mut self,
+        command: Command,
+    ) -> Option<Result<concat_host::session::EditorView, String>> {
         // An edit ends whatever burst the view was in.
         self.end_burst();
         log::info!("edit: {}", command_name(&command));
@@ -2821,20 +2838,15 @@ impl Studio {
         let session = self.session.as_mut()?;
         let chosen = matches!(command, Command::SetTimelineVideo { .. });
         let before = session.video().color_space;
-        match session.apply(command) {
-            Ok(view) => {
-                let after = session.video().color_space;
-                self.after_change();
-                if !chosen {
-                    self.tell_of_hdr(before, after);
-                }
-                view.created_id
-            }
-            Err(error) => {
-                self.notify(&error, true);
-                None
+        let outcome = session.apply(command);
+        if outcome.is_ok() {
+            let after = session.video().color_space;
+            self.after_change();
+            if !chosen {
+                self.tell_of_hdr(before, after);
             }
         }
+        Some(outcome)
     }
 
     /// [`Studio::apply`] as one move of an inspector gesture: the same

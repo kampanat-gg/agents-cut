@@ -29,21 +29,25 @@ when it needs to. Prompting and editing in one app.
 - **`concat-speech`**: local Whisper captions and TTS, already wired to the
   `captions_add` tool.
 
-Most of the agent's tool layer is already built. The new work is the sidebar,
-the process that runs the agent, and live mode (below).
+Most of the agent's tool layer is already built, live mode included. The new
+work is the sidebar and the process that runs the agent.
 
-## The missing piece: live mode
+## Live mode (done)
 
-Right now an agent edits **its own** project, and the window refuses to let it
-open the one on screen (upstream issue #337). A sidebar agent must edit the
-project you are looking at, through the window's own undo stack, so that:
+An agent connected through the window (`concat --mcp window`) edits the
+project you are looking at. The API's server hands every call on that
+project to the window (`concat_api::LiveWindow`, implemented in
+`crates/concat/src/studio/live.rs`), which runs it on its event loop through
+the same paths a click takes:
 
 - every agent edit is one undo step in the window, and Cmd-Z works on it;
-- the preview and timeline update as the agent edits;
-- you and the agent never write over each other.
+- the preview and timeline update as the agent edits, and the autosave
+  writes it;
+- there is one session, so you and the agent never save over each other.
 
-That is the core engineering task: route the API Hub's edit commands for the
-open project into the window's edit path, instead of locking it.
+Frames and exports read a copy of the edit (`Session::detached`), so a
+render never holds up the window. A call waits at most 30 seconds for the
+window (a modal dialog holds the event loop) and then fails with a reason.
 
 ## Running the agent: Claude Code CLI
 
@@ -72,7 +76,7 @@ claude -p \
 
 | Need | MCP server |
 | --- | --- |
-| Edit this video | the app itself (`concat --mcp window`, after live mode) |
+| Edit this video | the app itself (`concat --mcp window`) |
 | Code, scripts, batch jobs | Codex: `codex mcp-server` |
 | Image or video generation | any image/video MCP the user adds (fal, Replicate, Gemini Imagen/Veo, ...) |
 | Voice | local TTS (built in) or an ElevenLabs-style MCP |
@@ -95,8 +99,8 @@ next run. Examples: TikTok fast-cut, Podcast clip, Tutorial, Cinematic.
 
 ## Build order
 
-1. Live mode: the agent edits the open project through the window's undo
-   stack.
+1. ~~Live mode: the agent edits the open project through the window's undo
+   stack.~~ Done.
 2. Sidebar pane: chat list, input box, tool cards, approvals.
 3. Agent process: spawn, stream, resume, cancel.
 4. MCP settings page: Codex, image/video generation, voice.
