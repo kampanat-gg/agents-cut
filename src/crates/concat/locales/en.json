@@ -14,6 +14,7 @@
   "agent.quickStart": "Start with",
   "agent.send": "Send",
   "agent.show": "Show the agent",
+  "agent.slowStart": "Waiting for Claude Code to start. If macOS is asking for permission in another window, allow it.",
   "agent.stop": "Stop",
   "agent.stopped": "Stopped",
   "agent.title": "Agent",

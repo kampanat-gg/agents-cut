@@ -1,0 +1,27 @@
+# A style: what a new project made with it starts as. The folder's
+# CLAUDE.md is copied into the project, where the agent reads it.
+
+name = "Vintage engraving 2.5D"
+name_th = "ภาพแกะสลักวินเทจ 2.5D"
+description = "Odd facts about nature, science and the past, told with 19th-century engravings cut out and moved like paper puppets."
+description_th = "เล่าเรื่องแปลกของธรรมชาติ วิทยาศาสตร์ และอดีต ด้วยภาพแกะสลักยุค 1800 ที่ตัดเป็นชิ้นแล้วขยับเหมือนหุ่นกระดาษ"
+aspect = "9:16"
+
+[[starters]]
+label = "New episode about a strange fact"
+label_th = "ทำตอนใหม่เรื่องแปลกเกี่ยวกับ"
+prompt = "Make a new episode about this strange fact: "
+prompt_th = "ทำตอนใหม่เรื่องแปลกเกี่ยวกับ: "
+fill = true
+
+[[starters]]
+label = "Write 5 hooks"
+label_th = "คิด hook 5 แบบ"
+prompt = "Write 5 hook options for the episode on the active timeline. Do not edit anything yet."
+prompt_th = "คิด hook 5 แบบสำหรับตอนใน timeline ที่เปิดอยู่ ยังไม่ต้องแก้อะไร"
+
+[[starters]]
+label = "Make the backdrop"
+label_th = "ทำฉากหลัง"
+prompt = "Make this style's backdrop for the active episode and lay it under the whole timeline."
+prompt_th = "ทำฉากหลังของสไตล์นี้ให้ตอนที่เปิดอยู่ แล้ววางใต้ทั้ง timeline"

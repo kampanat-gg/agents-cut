@@ -1,0 +1,27 @@
+# A style: what a new project made with it starts as. The folder's
+# CLAUDE.md is copied into the project, where the agent reads it.
+
+name = "Kinetic words"
+name_th = "ตัวหนังสือเคลื่อนไหว"
+description = "Quotes, lessons and podcast moments as bold moving text timed to the voice, with almost no pictures."
+description_th = "คำคม บทเรียน และช่วงเด่นของพอดแคสต์ เป็นตัวหนังสือตัวใหญ่ที่ขยับตามเสียง แทบไม่ใช้ภาพ"
+aspect = "9:16"
+
+[[starters]]
+label = "Words from a voice clip"
+label_th = "ทำจากคลิปเสียง"
+prompt = "Make a kinetic words episode from the voice or video clip in assets/."
+prompt_th = "ทำตอนตัวหนังสือเคลื่อนไหวจากคลิปเสียงหรือวิดีโอใน assets/"
+
+[[starters]]
+label = "Words from a script"
+label_th = "ทำจากสคริปต์"
+prompt = "Make a kinetic words episode from this text, timed at a calm reading pace: "
+prompt_th = "ทำตอนตัวหนังสือเคลื่อนไหวจากข้อความนี้ จังหวะเท่าการอ่านช้าๆ: "
+fill = true
+
+[[starters]]
+label = "Pick the strongest 30 seconds"
+label_th = "เลือก 30 วินาทีที่ดีที่สุด"
+prompt = "Find the strongest 30 seconds of the clip in assets/ and make that the episode."
+prompt_th = "หา 30 วินาทีที่ดีที่สุดของคลิปใน assets/ แล้วทำเป็นตอน"

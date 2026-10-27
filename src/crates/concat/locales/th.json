@@ -14,6 +14,7 @@
   "agent.quickStart": "เริ่มจาก",
   "agent.send": "ส่ง",
   "agent.show": "แสดง agent",
+  "agent.slowStart": "กำลังรอ Claude Code เริ่มทำงาน ถ้า macOS ถามขอสิทธิ์อยู่ในหน้าต่างอื่น ให้กดอนุญาต",
   "agent.stop": "หยุด",
   "agent.stopped": "หยุดแล้ว",
   "agent.title": "Agent",

@@ -163,6 +163,55 @@ export struct StartData {
 
 // ── the small parts ──────────────────────────────────────────────────────
 
+// The styles as a grid of cards, the picked one outlined: more of them than a
+// row of chips can hold, with names long enough to need two lines.
+component StyleGrid inherits Rectangle {
+    in property <[ChipOption]> options;
+    in property <int> current;
+    in property <bool> enabled: true;
+    in property <int> columns: 3;
+
+    callback changed(index: int);
+
+    property <length> gap: 8px;
+    property <length> card-w: (root.width - (root.columns - 1) * root.gap) / root.columns;
+    property <length> card-h: 46px;
+
+    height: Math.ceil(root.options.length / root.columns) * (root.card-h + root.gap) - root.gap;
+
+    for option[index] in root.options: Rectangle {
+        x: Math.mod(index, root.columns) * (root.card-w + root.gap);
+        y: Math.floor(index / root.columns) * (root.card-h + root.gap);
+        width: root.card-w;
+        height: root.card-h;
+        border-radius: Theme.r;
+        border-width: index == root.current ? 2px : 1px;
+        border-color: index == root.current ? Theme.accent : Theme.line;
+        background: index == root.current ? Theme.accent-soft
+            : touch.has-hover && root.enabled ? Theme.launch-field-active
+            : Theme.launch-field;
+
+        Text {
+            x: 10px;
+            width: parent.width - 20px;
+            height: parent.height;
+            text: option.label;
+            color: Theme.fg;
+            font-size: Theme.fs;
+            font-weight: index == root.current ? Theme.weight-title : Theme.weight-body;
+            wrap: word-wrap;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+
+        touch := TouchArea {
+            enabled: root.enabled;
+            mouse-cursor: pointer;
+            clicked => { root.changed(index); }
+        }
+    }
+}
+
 // The shape of a frame: a box of the frame's own proportions inside a
 // square of room, so 9:16 reads as upright at a glance and 4:3 as nearly
 // square, without anyone reading the digits. At 15px it rides inside a
@@ -2235,11 +2284,11 @@ export component NewProjectDialog inherits Modal {
             VerticalLayout {
                 spacing: 8px;
 
-                ChipRow {
+                StyleGrid {
                     options: root.data.style-options;
                     current: root.data.style;
                     enabled: !root.data.busy;
-                    block: root.narrow;
+                    columns: root.narrow ? 2 : 3;
                     changed(index) => { root.style-changed(index); }
                 }
 

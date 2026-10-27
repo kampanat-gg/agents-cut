@@ -1,0 +1,27 @@
+# A style: what a new project made with it starts as. The folder's
+# CLAUDE.md is copied into the project, where the agent reads it.
+
+name = "Anime story"
+name_th = "อนิเมะเล่าเรื่อง"
+description = "Stories, romance and everyday moments as hand-painted anime scenes, with your own characters kept the same."
+description_th = "เรื่องเล่า ความรัก และชีวิตประจำวัน เป็นฉากอนิเมะวาดมือ ตัวละครหน้าเดิมทุกตอน"
+aspect = "9:16"
+
+[[starters]]
+label = "New story"
+label_th = "เรื่องใหม่"
+prompt = "Make a new anime episode from this story: "
+prompt_th = "ทำตอนอนิเมะใหม่จากเรื่องนี้: "
+fill = true
+
+[[starters]]
+label = "Turn my character into anime"
+label_th = "ทำตัวละครของฉันเป็นอนิเมะ"
+prompt = "Make an anime reference sheet (front, three-quarter, side) of the character in characters/ and save it there as anime-ref.png."
+prompt_th = "ทำภาพอ้างอิงแบบอนิเมะ (หน้าตรง สามส่วนสี่ ด้านข้าง) ของตัวละครใน characters/ แล้วเซฟไว้ที่นั่นชื่อ anime-ref.png"
+
+[[starters]]
+label = "Plan the shots"
+label_th = "วางมุมกล้อง"
+prompt = "Plan the shots for the active episode as a shot list (size, angle, move, what the character does) before making pictures."
+prompt_th = "วางมุมกล้องของตอนที่เปิดอยู่เป็นรายการช็อต (ขนาดภาพ มุม การเคลื่อนกล้อง ตัวละครทำอะไร) ก่อนสร้างภาพ"

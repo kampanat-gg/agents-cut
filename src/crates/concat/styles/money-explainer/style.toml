@@ -1,0 +1,22 @@
+# A style: what a new project made with it starts as. The folder's
+# CLAUDE.md is copied into the project, where the agent reads it.
+
+name = "Money made simple"
+name_th = "การเงินเข้าใจง่าย"
+description = "Personal finance explained with clean flat illustrations, big numbers and simple charts. Not advice."
+description_th = "เรื่องการเงินส่วนตัว อธิบายด้วยภาพแบน สะอาด ตัวเลขใหญ่ และกราฟง่ายๆ ไม่ใช่คำแนะนำการลงทุน"
+aspect = "9:16"
+
+[[starters]]
+label = "Explain a money topic"
+label_th = "อธิบายเรื่องเงิน"
+prompt = "Make a new episode explaining this money topic simply: "
+prompt_th = "ทำตอนใหม่อธิบายเรื่องเงินนี้แบบเข้าใจง่าย: "
+fill = true
+
+[[starters]]
+label = "Compare two choices"
+label_th = "เทียบสองทางเลือก"
+prompt = "Make a new episode comparing these two choices with numbers: "
+prompt_th = "ทำตอนใหม่เทียบสองทางเลือกนี้ด้วยตัวเลข: "
+fill = true

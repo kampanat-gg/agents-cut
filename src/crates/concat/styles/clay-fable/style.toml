@@ -1,0 +1,28 @@
+# A style: what a new project made with it starts as. The folder's
+# CLAUDE.md is copied into the project, where the agent reads it.
+
+name = "Clay fable"
+name_th = "นิทานดินปั้น"
+description = "Fables and kids' stories as stop-motion clay scenes, with a gentle voice and a moral at the end."
+description_th = "นิทานและเรื่องสำหรับเด็ก เป็นฉากดินปั้นแบบ stop motion เสียงเล่าอ่อนโยน และข้อคิดตอนจบ"
+aspect = "9:16"
+
+[[starters]]
+label = "New fable"
+label_th = "นิทานเรื่องใหม่"
+prompt = "Make a new clay fable about: "
+prompt_th = "ทำนิทานดินปั้นเรื่องใหม่เกี่ยวกับ: "
+fill = true
+
+[[starters]]
+label = "Retell a classic tale"
+label_th = "เล่านิทานคลาสสิกใหม่"
+prompt = "Retell this classic tale as a clay fable: "
+prompt_th = "เล่านิทานคลาสสิกเรื่องนี้ใหม่เป็นดินปั้น: "
+fill = true
+
+[[starters]]
+label = "Make the characters"
+label_th = "สร้างตัวละคร"
+prompt = "Make clay reference pictures of the main characters of the active episode and save them in characters/."
+prompt_th = "สร้างภาพอ้างอิงแบบดินปั้นของตัวละครหลักในตอนที่เปิดอยู่ แล้วเซฟไว้ใน characters/"

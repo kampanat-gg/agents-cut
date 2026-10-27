@@ -24,12 +24,36 @@ pub const SETTINGS: &str = "style.toml";
 /// characters to keep the same, and what the user brings.
 const FOLDERS: [&str; 3] = ["generated", "characters", "assets"];
 
-/// The built-in styles: their folder name, settings and recipe.
-const BUILT_IN: [(&str, &str, &str); 1] = [(
-    "paper-collage-history",
-    include_str!("../styles/paper-collage-history/style.toml"),
-    include_str!("../styles/paper-collage-history/CLAUDE.md"),
-)];
+/// One built-in style's folder name, settings and recipe, read in at
+/// build time.
+macro_rules! style {
+    ($id:literal) => {
+        (
+            $id,
+            include_str!(concat!("../styles/", $id, "/style.toml")),
+            include_str!(concat!("../styles/", $id, "/CLAUDE.md")),
+        )
+    };
+}
+
+/// The built-in styles, in the order the New Project sheet shows them:
+/// stories and knowledge, then characters, then music.
+const BUILT_IN: [(&str, &str, &str); 14] = [
+    style!("paper-collage-history"),
+    style!("vintage-engraving"),
+    style!("isometric-world"),
+    style!("map-explainer"),
+    style!("true-crime-mystery"),
+    style!("top-list"),
+    style!("money-explainer"),
+    style!("kinetic-quote"),
+    style!("what-if"),
+    style!("anime-story"),
+    style!("cute-3d-character"),
+    style!("clay-fable"),
+    style!("music-collage"),
+    style!("lofi-loop"),
+];
 
 /// One button in the sidebar: a prompt sent as it is, or put in the box
 /// for the user to finish.

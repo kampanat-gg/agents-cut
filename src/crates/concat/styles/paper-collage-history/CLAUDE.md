@@ -6,9 +6,7 @@ viewer knows the channel at a glance. Follow this file for every episode.
 
 ## Episodes
 
-- One episode is one timeline tab. A new episode: `edit_apply` with
-  `{"op": "addTimeline"}`, then `{"op": "renameTimeline", "timelineId": ...,
-  "name": "EP<number> <short title>"}`. Keep earlier episodes as they are.
+- Name tabs `EP<number> <short title>`.
 - Length 45 to 90 seconds unless the user asks otherwise.
 - Structure:
   1. Hook, 0 to 3 s: the most surprising fact or question, as big text over
@@ -18,8 +16,8 @@ viewer knows the channel at a glance. Follow this file for every episode.
      picture or layered scene per beat.
   4. Payoff: what it led to, or why it matters now.
   5. Close, 2 to 3 s: one line that invites a follow or the next episode.
-- A cut or a new move every 2 to 3 seconds. Nothing on screen stays still
-  for longer: drift, push in, a small rotation, a pop in.
+- Nothing on screen stays still for longer than 3 seconds: drift, push in,
+  a small rotation, a pop in.
 
 ## Writing
 

@@ -1,0 +1,21 @@
+# A style: what a new project made with it starts as. The folder's
+# CLAUDE.md is copied into the project, where the agent reads it.
+
+name = "What if...?"
+name_th = "ถ้าหาก...?"
+description = "Curious 'what if' worlds shown as calm, realistic documentary stills, played completely straight."
+description_th = "โลกแบบ 'ถ้าหาก...' ที่ชวนสงสัย เล่าเป็นภาพนิ่งสารคดีสมจริง เล่าแบบจริงจังเหมือนเป็นเรื่องปกติ"
+aspect = "9:16"
+
+[[starters]]
+label = "New what if"
+label_th = "ถ้าหาก... เรื่องใหม่"
+prompt = "Make a new 'what if' episode: What if "
+prompt_th = "ทำตอน 'ถ้าหาก' ใหม่: ถ้าหาก"
+fill = true
+
+[[starters]]
+label = "Write 5 what-if ideas"
+label_th = "คิดไอเดีย 5 เรื่อง"
+prompt = "Write 5 'what if' ideas that fit this channel. Do not edit anything yet."
+prompt_th = "คิดไอเดีย 'ถ้าหาก' 5 เรื่องที่เข้ากับช่องนี้ ยังไม่ต้องแก้อะไร"

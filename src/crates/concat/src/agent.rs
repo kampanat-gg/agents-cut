@@ -41,6 +41,11 @@ const ALLOWED: &str = "mcp__concat";
 /// other, or one chained after it, is refused without asking.
 const CODEX_RULE: &str = "Bash(codex exec:*)";
 
+/// How long a turn may say nothing before the sidebar says it is waiting:
+/// a first start can sit behind a system prompt (a privacy question about
+/// the folder, a Keychain question) that nobody sees.
+const QUIET: std::time::Duration = std::time::Duration::from_secs(20);
+
 /// How much of a tool's input or a failure is shown under its row.
 const DETAIL_CHARS: usize = 160;
 
@@ -84,6 +89,8 @@ struct Turn {
     child: Arc<Mutex<Child>>,
     /// The process said how the turn ended.
     finished: bool,
+    /// The process has said anything at all.
+    heard: bool,
 }
 
 /// The conversation, and the process behind it.
@@ -102,6 +109,8 @@ pub struct Chat {
     /// running.
     server: Option<concat_server::Server>,
     shown: bool,
+    /// Fires once a turn has been quiet for [`QUIET`].
+    watch: slint::Timer,
 }
 
 impl Default for Chat {
@@ -115,6 +124,7 @@ impl Default for Chat {
             tools: HashMap::new(),
             server: None,
             shown: true,
+            watch: slint::Timer::default(),
         }
     }
 }
@@ -219,11 +229,22 @@ impl Chat {
         }
     }
 
+    /// Says so when the turn `epoch` is still running and has said nothing.
+    fn still_quiet(&mut self, epoch: u64) {
+        if epoch == self.epoch && self.turn.as_ref().is_some_and(|turn| !turn.heard) {
+            self.push("note", &t("agent.slowStart"), "", 0);
+        }
+    }
+
     /// Takes one thing the process said, if it is from the turn running.
     pub fn hear(&mut self, epoch: u64, said: Said) {
-        if epoch != self.epoch || self.turn.is_none() {
+        if epoch != self.epoch {
             return;
         }
+        let Some(turn) = self.turn.as_mut() else {
+            return;
+        };
+        turn.heard = true;
         match said {
             Said::Session(id) => self.session = Some(id),
             Said::Text(text) => {
@@ -346,7 +367,16 @@ fn start(studio: &mut Studio, text: &str) -> Result<(), String> {
     chat.turn = Some(Turn {
         child: Arc::clone(&child),
         finished: false,
+        heard: false,
     });
+    chat.watch
+        .start(slint::TimerMode::SingleShot, QUIET, move || {
+            Shell::with(|shell, app| {
+                let mut studio = shell.studio.borrow_mut();
+                studio.agent.still_quiet(epoch);
+                studio.agent.publish(&app);
+            });
+        });
     log::info!("agent: turn {epoch} started");
 
     std::thread::Builder::new()
