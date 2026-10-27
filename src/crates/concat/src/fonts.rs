@@ -10,30 +10,21 @@
 //! once, at start, before any window exists, rather than embedded a second
 //! time.
 //!
-//! None of them has a Chinese, Korean, Arabic, Hebrew, Devanagari, Bengali
-//! or Thai glyph, and Hanken Grotesk, the interface's face, has no
-//! Cyrillic, so a word in those scripts is whatever the machine's own
-//! fonts make of it. A desk has them; a phone from some makers does not,
-//! or keeps them where the collection does not look, and a minimal Linux
-//! install may have none: the interface in Chinese came up as rows of
-//! boxes (#277). So a face for each rides along as the fallback for its
-//! scripts, after whatever the machine has - Noto, cut to what the
-//! interface needs - and Inter, which the title painter carries anyway,
-//! stands behind the machine's own for Cyrillic and Greek.
+//! None of them has a Thai glyph, and Hanken Grotesk, the interface's face,
+//! has no Cyrillic, so a word in those scripts is whatever the machine's
+//! own fonts make of it. So Noto Sans Thai rides along as the fallback for
+//! Thai, after whatever the machine has, and Inter, which the title painter
+//! carries anyway, stands behind the machine's own for Cyrillic and Greek.
+//! macOS lends every other script from its own fonts.
 //!
-//! The Noto faces live in concat-text, which falls back on them for titles
-//! too; their sources, the way they were cut and their licences are on
-//! `concat_text::SCRIPT_FALLBACKS`, and THIRD_PARTY_NOTICES.md lists them.
+//! The Noto face lives in concat-text, which falls back on it for titles
+//! too; its source, the way it was cut and its licence are on
+//! `concat_text::SCRIPT_FALLBACKS`, and THIRD_PARTY_NOTICES.md lists it.
 
 use std::sync::Arc;
 
 use slint::fontique_011::fontique::{self, FallbackKey, FamilyId, Language, Script};
 
-const CJK_FALLBACK: &[u8] = concat_text::NOTO_SANS_CJK_SC;
-const ARABIC_FALLBACK: &[u8] = concat_text::NOTO_SANS_ARABIC_UI;
-const HEBREW_FALLBACK: &[u8] = concat_text::NOTO_SANS_HEBREW;
-const DEVANAGARI_FALLBACK: &[u8] = concat_text::NOTO_SANS_DEVANAGARI;
-const BENGALI_FALLBACK: &[u8] = concat_text::NOTO_SANS_BENGALI;
 const THAI_FALLBACK: &[u8] = concat_text::NOTO_SANS_THAI;
 
 /// A face the window falls back on, and the fallback lists it goes on: a
@@ -45,51 +36,12 @@ struct Fallback {
     scripts: &'static [(&'static str, &'static [&'static str])],
 }
 
-/// Every bundled fallback face. Han goes under every locale fontique keeps
-/// a list of its own for - Simplified Chinese is the default, and Taiwan,
-/// Hong Kong, Macau and Singapore, Japanese and Korean each have one - and
-/// Arabic under Persian's and Urdu's as well as its default, Arabic's.
-const FALLBACKS: [Fallback; 6] = [
-    Fallback {
-        face: CJK_FALLBACK,
-        family: "Noto Sans CJK SC",
-        scripts: &[
-            (
-                "Hani",
-                &["", "zh-TW", "zh-HK", "zh-MO", "zh-SG", "ja", "ko"],
-            ),
-            ("Hang", &[""]),
-            ("Hira", &[""]),
-            ("Kana", &[""]),
-            ("Bopo", &[""]),
-        ],
-    },
-    Fallback {
-        face: ARABIC_FALLBACK,
-        family: "Noto Sans Arabic UI",
-        scripts: &[("Arab", &["", "fa", "ur"])],
-    },
-    Fallback {
-        face: HEBREW_FALLBACK,
-        family: "Noto Sans Hebrew",
-        scripts: &[("Hebr", &[""])],
-    },
-    Fallback {
-        face: DEVANAGARI_FALLBACK,
-        family: "Noto Sans Devanagari",
-        scripts: &[("Deva", &[""])],
-    },
-    Fallback {
-        face: BENGALI_FALLBACK,
-        family: "Noto Sans Bengali",
-        scripts: &[("Beng", &[""])],
-    },
-    Fallback {
-        face: THAI_FALLBACK,
-        family: "Noto Sans Thai",
-        scripts: &[("Thai", &[""])],
-    },
-];
+/// Every bundled fallback face.
+const FALLBACKS: [Fallback; 1] = [Fallback {
+    face: THAI_FALLBACK,
+    family: "Noto Sans Thai",
+    scripts: &[("Thai", &[""])],
+}];
 
 /// The scripts Inter stands behind the machine's fonts for: Hanken
 /// Grotesk has Latin and nothing else.
@@ -207,29 +159,18 @@ mod tests {
                 assert_eq!(listed, vec![*family], "{} on {key:?}", fallback.family);
             }
         }
-        // The lists a Chinese, Korean, Persian or Urdu word is looked up
-        // by, named the way the shaper names them.
-        for (script, locale, family) in [
-            ("Hani", None, "Noto Sans CJK SC"),
-            ("Hani", Some("zh-TW"), "Noto Sans CJK SC"),
-            ("Hani", Some("ko"), "Noto Sans CJK SC"),
-            ("Hang", None, "Noto Sans CJK SC"),
-            ("Arab", None, "Noto Sans Arabic UI"),
-            ("Arab", Some("ar"), "Noto Sans Arabic UI"),
-            ("Arab", Some("fa"), "Noto Sans Arabic UI"),
-            ("Arab", Some("ur"), "Noto Sans Arabic UI"),
-            ("Hebr", Some("he"), "Noto Sans Hebrew"),
-            ("Deva", Some("hi"), "Noto Sans Devanagari"),
-            ("Beng", Some("bn"), "Noto Sans Bengali"),
-            ("Thai", Some("th"), "Noto Sans Thai"),
-        ] {
-            let script: Script = script.parse().expect("a script");
-            let language = locale.and_then(|locale| Language::parse(locale).ok());
-            let key = FallbackKey::new(script, language.as_ref());
-            let listed: Vec<FamilyId> = collection.fallback_families(key).collect();
-            assert_eq!(listed.len(), 1, "{key:?}");
-            assert_eq!(collection.family_name(listed[0]), Some(family), "{key:?}");
-        }
+        // The list a Thai word is looked up by, named the way the shaper
+        // names it.
+        let script: Script = "Thai".parse().expect("a script");
+        let language = Language::parse("th").ok();
+        let key = FallbackKey::new(script, language.as_ref());
+        let listed: Vec<FamilyId> = collection.fallback_families(key).collect();
+        assert_eq!(listed.len(), 1, "{key:?}");
+        assert_eq!(
+            collection.family_name(listed[0]),
+            Some("Noto Sans Thai"),
+            "{key:?}"
+        );
     }
 
     /// Inter stands behind the machine's fonts for Cyrillic and Greek,

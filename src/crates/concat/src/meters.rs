@@ -70,8 +70,6 @@ pub struct MeterFeed {
     left: Side,
     right: Side,
     pub clipped: bool,
-    /// The window is a phone's, whose shell has no meters to feed.
-    pub phone: bool,
     timer: slint::Timer,
 }
 
@@ -79,7 +77,7 @@ impl Studio {
     /// Whether anything can see the meters: the tray's switch is on, and
     /// a timeline - whose right edge they sit on - is in the dock.
     pub fn meters_shown(&self) -> bool {
-        !self.meters.phone && self.prefs.meters_shown() && self.dock.contains(PaneKind::Timeline)
+        self.prefs.meters_shown() && self.dock.contains(PaneKind::Timeline)
     }
 
     fn rolling(&self) -> bool {

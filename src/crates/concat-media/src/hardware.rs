@@ -93,12 +93,10 @@ impl HwDevice {
     /// The device this binary's platform has, or `None` where there is no
     /// device worth choosing unasked: Linux, whose VAAPI is opt-in only.
     pub fn platform_default() -> Option<Self> {
-        if cfg!(any(target_os = "macos", target_os = "ios")) {
+        if cfg!(target_os = "macos") {
             Some(HwDevice::VideoToolbox)
         } else if cfg!(target_os = "windows") {
             Some(HwDevice::D3d11va)
-        } else if cfg!(target_os = "android") {
-            Some(HwDevice::MediaCodec)
         } else {
             None
         }

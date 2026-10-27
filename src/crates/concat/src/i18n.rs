@@ -54,33 +54,9 @@ pub const ENGLISH: &str = "en";
 /// The locales the app ships, as `(code, file)`. `en.json` is the
 /// inventory - every key, with its English - which is what a translator
 /// starts a new file from, and what every language falls back to.
-pub(crate) const BUILT_IN: [(&str, &str); 26] = [
+pub(crate) const BUILT_IN: [(&str, &str); 2] = [
     ("en", include_str!("../locales/en.json")),
-    ("ar", include_str!("../locales/ar.json")),
-    ("az", include_str!("../locales/az.json")),
-    ("bn", include_str!("../locales/bn.json")),
-    ("de", include_str!("../locales/de.json")),
-    ("es", include_str!("../locales/es.json")),
-    ("fa", include_str!("../locales/fa.json")),
-    ("fr", include_str!("../locales/fr.json")),
-    ("he", include_str!("../locales/he.json")),
-    ("hi", include_str!("../locales/hi.json")),
-    ("hr", include_str!("../locales/hr.json")),
-    ("id", include_str!("../locales/id.json")),
-    ("it", include_str!("../locales/it.json")),
-    ("ja", include_str!("../locales/ja.json")),
-    ("ko", include_str!("../locales/ko.json")),
-    ("nl", include_str!("../locales/nl.json")),
-    ("pl", include_str!("../locales/pl.json")),
-    ("pt-BR", include_str!("../locales/pt-BR.json")),
-    ("ru", include_str!("../locales/ru.json")),
     ("th", include_str!("../locales/th.json")),
-    ("tr", include_str!("../locales/tr.json")),
-    ("uk", include_str!("../locales/uk.json")),
-    ("ur", include_str!("../locales/ur.json")),
-    ("vi", include_str!("../locales/vi.json")),
-    ("zh-Hans", include_str!("../locales/zh-Hans.json")),
-    ("zh-TW", include_str!("../locales/zh-TW.json")),
 ];
 
 /// One language's strings.
@@ -369,29 +345,6 @@ mod tests {
         assert_eq!(shipped, files);
     }
 
-    #[test]
-    fn both_chinese_standards_ship_under_their_own_names() {
-        let names: HashMap<&str, String> = BUILT_IN
-            .iter()
-            .map(|(code, text)| (*code, parse(text).expect("parses").0))
-            .collect();
-        assert_eq!(names["zh-Hans"], "简体中文");
-        assert_eq!(names["zh-TW"], "繁體中文");
-        // The two files are different translations, not one in two scripts
-        // with a handful of lines swapped: the Taiwan file speaks of
-        // 檔案 and 影片, the mainland file of 文件 and 视频.
-        let hans = parse(BUILT_IN.iter().find(|(c, _)| *c == "zh-Hans").unwrap().1)
-            .unwrap()
-            .1;
-        let tw = parse(BUILT_IN.iter().find(|(c, _)| *c == "zh-TW").unwrap().1)
-            .unwrap()
-            .1;
-        assert_eq!(hans["common.export"], "导出");
-        assert_eq!(tw["common.export"], "匯出");
-        assert_eq!(hans["common.settings"], "设置");
-        assert_eq!(tw["common.settings"], "設定");
-    }
-
     /// Every key is dotted lowerCamelCase: an area, then a name for the
     /// string in it.
     #[test]
@@ -440,8 +393,8 @@ mod tests {
         let _language = language();
         let root = std::env::temp_dir().join(format!("concat-i18n-{}", std::process::id()));
         let dirs = AppDirs::under(&root);
-        select("de", &dirs);
-        assert_eq!(current(), "de");
+        select("th", &dirs);
+        assert_eq!(current(), "th");
         assert_eq!(t("a key nobody translated"), "a key nobody translated");
         assert_ne!(t("common.settings"), "Settings");
         select(ENGLISH, &dirs);

@@ -802,9 +802,7 @@ export component PreviewPane inherits Rectangle {
     callback pane-removed();
 
     /// The stage alone: no header over it and no transport under it. The
-    /// phone's monitor, which has a transport of its own on the row below
-    /// and states the output nowhere - see ui/phone/. The stage keeps
-    /// every gesture it has: a drag moves a picture, a press on the well
+    /// stage keeps every gesture it has: a drag moves a picture, a press on the well
     /// pans the view, a double tap fits it again.
     in property <bool> bare: false;
 

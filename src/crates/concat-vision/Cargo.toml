@@ -39,9 +39,6 @@ ort = { workspace = true, optional = true, features = ["coreml"] }
 [target.'cfg(target_os = "windows")'.dependencies]
 ort = { workspace = true, optional = true, features = ["directml"] }
 
-[target.'cfg(target_os = "android")'.dependencies]
-ort = { workspace = true, optional = true, features = ["nnapi"] }
-
 # The ONNX Runtime API ort asks for: 27, served by the 1.28 every other
 # target links, everywhere but an Intel Mac.
 [target.'cfg(not(all(target_os = "macos", target_arch = "x86_64")))'.dependencies]

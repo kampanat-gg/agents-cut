@@ -110,14 +110,13 @@ file's licence is beside it in `src/crates/concat-text/fonts/`, as
 - **Shadows Into Light Two**: The Shadows Into Light Two Project Authors. OFL. See `fonts/LICENSE-ShadowsIntoLightTwo.txt`.
 - **Pixelify Sans**: The Pixelify Sans Project Authors. OFL. See `fonts/LICENSE-PixelifySans.txt`.
 - **Google Sans Code**: The Google Sans Code Project Authors. OFL. See `fonts/LICENSE-GoogleSansCode.txt`.
-- **Kosugi Maru**: Copyright MOTOYA Co., Ltd. Apache License 2.0. See `fonts/LICENSE-KosugiMaru.txt`.
 - **Frijole**: The Frijole Project Authors. OFL. See `fonts/LICENSE-Frijole.txt`.
 - **Emilys Candy**: The Emilys Candy Project Authors. OFL. See `fonts/LICENSE-EmilysCandy.txt`.
 - **Mystery Quest**: The Mystery Quest Project Authors. OFL. See `fonts/LICENSE-MysteryQuest.txt`.
 - **Zen Tokyo Zoo**: The Zen Tokyo Zoo Project Authors. OFL. See `fonts/LICENSE-ZenTokyoZoo.txt`.
 
-The Noto faces in `src/crates/concat-text/fonts/` are the fallback for the
-scripts the other faces do not draw, in the interface and in titles and
+The Noto face in `src/crates/concat-text/fonts/` is the fallback for Thai,
+which the other faces do not draw, in the interface and in titles and
 captions alike, compiled into the binary once
 (`src/crates/concat-text/src/lib.rs`, `SCRIPT_FALLBACKS`). Each is the
 Regular face from the notofonts project's own release, cut down with
@@ -126,11 +125,6 @@ in and the command that cut it are recorded beside each face there. A subset is 
 Version under the OFL, and keeps the family name the release gave it, as
 the OFL allows for Noto, which reserves no font name.
 
-- **Noto Sans CJK SC** (a subset: GB 2312, Big5 level 1, JIS X 0208, the Hangul of KS X 1001 and the kana): Copyright 2014-2021 Adobe (http://www.adobe.com/), with Reserved Font Name 'Source'. OFL. See `src/crates/concat-text/fonts/LICENSE-NotoSansCJK.txt`.
-- **Noto Sans Arabic UI** 2.011 (a subset: the Arabic block and the characters the Arabic, Persian and Urdu interface uses): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/arabic). OFL. See `src/crates/concat-text/fonts/LICENSE-NotoSansArabicUI.txt`.
-- **Noto Sans Hebrew** 3.001 (a subset: the Hebrew block): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/hebrew). OFL. See `src/crates/concat-text/fonts/LICENSE-NotoSansHebrew.txt`.
-- **Noto Sans Devanagari** 2.007 (a subset: the Devanagari block): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/devanagari). OFL. See `src/crates/concat-text/fonts/LICENSE-NotoSansDevanagari.txt`.
-- **Noto Sans Bengali** 3.011 (a subset: the Bengali block): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/bengali). OFL. See `src/crates/concat-text/fonts/LICENSE-NotoSansBengali.txt`.
 - **Noto Sans Thai** 2.002 (a subset: the Thai block): Copyright 2022 The Noto Project Authors (https://github.com/notofonts/thai). OFL. See `src/crates/concat-text/fonts/LICENSE-NotoSansThai.txt`.
 
 The licence does not permit selling the font on its own; shipping the

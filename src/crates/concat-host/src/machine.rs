@@ -217,19 +217,11 @@ mod os {
 
 #[cfg(target_vendor = "apple")]
 mod os {
-    /// "macOS 15.6.1 · Mac15,6", or "iOS 26.0 · iPhone17,1".
+    /// "macOS 15.6.1 · Mac15,6".
     pub(super) fn describe() -> Option<String> {
         let version = sysctl("kern.osproductversion")?;
-        let name = if cfg!(target_os = "ios") {
-            "iOS"
-        } else {
-            "macOS"
-        };
-        let model = sysctl(if cfg!(target_os = "ios") {
-            "hw.machine"
-        } else {
-            "hw.model"
-        });
+        let name = "macOS";
+        let model = sysctl("hw.model");
         Some(match model {
             Some(model) => format!("{name} {version} · {model}"),
             None => format!("{name} {version}"),
@@ -264,37 +256,7 @@ mod os {
     }
 }
 
-#[cfg(target_os = "android")]
-mod os {
-    /// "Android 11 (API 30) · Google Pixel 4a".
-    pub(super) fn describe() -> Option<String> {
-        let release = property("ro.build.version.release")?;
-        let api = property("ro.build.version.sdk").unwrap_or_default();
-        let maker = property("ro.product.manufacturer").unwrap_or_default();
-        let model = property("ro.product.model").unwrap_or_default();
-        Some(
-            format!("Android {release} (API {api}) · {maker} {model}")
-                .trim()
-                .to_owned(),
-        )
-    }
-
-    fn property(name: &str) -> Option<String> {
-        let name = std::ffi::CString::new(name).ok()?;
-        let mut buf = [0u8; 92]; // PROP_VALUE_MAX
-        // SAFETY: the buffer is PROP_VALUE_MAX bytes, all a value can be.
-        let len = unsafe { libc::__system_property_get(name.as_ptr(), buf.as_mut_ptr().cast()) };
-        if len <= 0 {
-            return None;
-        }
-        let text = String::from_utf8_lossy(&buf[..len as usize])
-            .trim()
-            .to_owned();
-        (!text.is_empty()).then_some(text)
-    }
-}
-
-#[cfg(all(unix, not(target_vendor = "apple"), not(target_os = "android")))]
+#[cfg(all(unix, not(target_vendor = "apple")))]
 mod os {
     /// "Linux Mint 22.3 · kernel 7.0.0-10-generic".
     pub(super) fn describe() -> Option<String> {

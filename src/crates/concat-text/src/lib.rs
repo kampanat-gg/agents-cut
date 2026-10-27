@@ -313,13 +313,12 @@ const BUNDLED: [&[u8]; 5] = [
 /// The base fonts every title can use, whatever the machine has installed:
 /// a working set of sans, serif, display, comic and script faces, at the
 /// weights a title wants. The text presets are built on them. Each is
-/// under the SIL Open Font License, Permanent Marker and Kosugi Maru
-/// under Apache 2.0; the licences are beside the files in fonts/. Pixelify
+/// under the SIL Open Font License, Permanent Marker under Apache 2.0; the licences are beside the files in fonts/. Pixelify
 /// Sans and Google Sans Code are variable fonts, drawn at their default
-/// (regular) weight: fontdb sets no variation axes. Kosugi Maru carries
-/// Japanese, Secular One and Rubik Scribble Hebrew. The window registers the
+/// (regular) weight: fontdb sets no variation axes. Secular One and Rubik
+/// Scribble carry Hebrew. The window registers the
 /// same bytes for its preset cards (concat's fonts.rs).
-pub const BASE_FONTS: [&[u8]; 41] = [
+pub const BASE_FONTS: [&[u8]; 40] = [
     include_bytes!("../fonts/Inter-Regular.ttf"),
     include_bytes!("../fonts/Inter-SemiBold.ttf"),
     include_bytes!("../fonts/Inter-Bold.ttf"),
@@ -356,55 +355,22 @@ pub const BASE_FONTS: [&[u8]; 41] = [
     include_bytes!("../fonts/ShadowsIntoLightTwo-Regular.ttf"),
     include_bytes!("../fonts/PixelifySans-Variable.ttf"),
     include_bytes!("../fonts/GoogleSansCode-Variable.ttf"),
-    include_bytes!("../fonts/KosugiMaru-Regular.ttf"),
     include_bytes!("../fonts/Frijole-Regular.ttf"),
     include_bytes!("../fonts/EmilysCandy-Regular.ttf"),
     include_bytes!("../fonts/MysteryQuest-Regular.ttf"),
     include_bytes!("../fonts/ZenTokyoZoo-Regular.ttf"),
 ];
 
-/// Noto Sans CJK SC, cut to GB 2312, Big5 level 1, JIS X 0208, KS X 1001's
-/// Hangul, the kana, the CJK punctuation and fullwidth forms, and every
-/// character in the shipped locales. Under three megabytes rather than
-/// sixteen. Japanese and Traditional Chinese read in the Simplified face's
-/// forms where the regions differ; a machine's own font for them comes
-/// first.
-pub const NOTO_SANS_CJK_SC: &[u8] = include_bytes!("../fonts/NotoSansCJKsc-Concat.otf");
-
-/// Noto Sans Arabic UI 2.011, for Arabic, Persian and Urdu: the UI cut,
-/// whose ascent and descent fit a line of Latin, where Noto Sans Arabic's
-/// would stand taller than the rows it is put in. Urdu reads in its
-/// Naskh-like forms, not Nastaliq; every Urdu letter is there. From
-/// https://github.com/notofonts/arabic/releases/download/NotoSansArabicUI-v2.011/NotoSansArabicUI-v2.011.zip
-/// (SHA-256 f775ee259557195721466e99ec0316bbcd897f0429e25955f5d9582ca1202ce7).
-pub const NOTO_SANS_ARABIC_UI: &[u8] = include_bytes!("../fonts/NotoSansArabicUI-Concat.ttf");
-
-/// Noto Sans Hebrew 3.001. From
-/// https://github.com/notofonts/hebrew/releases/download/NotoSansHebrew-v3.001/NotoSansHebrew-v3.001.zip
-/// (SHA-256 df0a71814b4e63644cf40fcc4529111b61266b7a2dafbe95068b29a7520cc3cb).
-pub const NOTO_SANS_HEBREW: &[u8] = include_bytes!("../fonts/NotoSansHebrew-Concat.ttf");
-
-/// Noto Sans Devanagari 2.007, for Hindi. From
-/// https://github.com/notofonts/devanagari/releases/download/NotoSansDevanagari-v2.007/NotoSansDevanagari-v2.007.zip
-/// (SHA-256 820c7da45b1e63562cb41c0a8cac5d9a4202312043a3a040ed1325857ef469b1).
-pub const NOTO_SANS_DEVANAGARI: &[u8] = include_bytes!("../fonts/NotoSansDevanagari-Concat.ttf");
-
-/// Noto Sans Bengali 3.011. From
-/// https://github.com/notofonts/bengali/releases/download/NotoSansBengali-v3.011/NotoSansBengali-v3.011.zip
-/// (SHA-256 2aca24bf71665e66c32e14862ee58857dd8b8b07b6321ec7c96f3121ad6683b1).
-pub const NOTO_SANS_BENGALI: &[u8] = include_bytes!("../fonts/NotoSansBengali-Concat.ttf");
-
 /// Noto Sans Thai 2.002, the loopless face Thai interfaces are set in.
 /// From https://github.com/notofonts/thai/releases/download/NotoSansThai-v2.002/NotoSansThai-v2.002.zip
 /// (SHA-256 af889cc673fc714060ce5e4e088fbad32aa4c0571a19958efeaff128a22da485).
 pub const NOTO_SANS_THAI: &[u8] = include_bytes!("../fonts/NotoSansThai-Concat.ttf");
 
-/// A face for each script the base fonts have no glyphs for, which every
-/// title falls back on after the machine's own fonts: a caption in Thai,
-/// Arabic or Korean draws its words wherever it is painted, not boxes on a
-/// phone with no font of its own to lend. Each is the static Regular
-/// instance from the notofonts releases, unhinted, cut with fonttools'
-/// `pyftsubset` to the script's whole basic block, Latin-1, the general
+/// The face every title falls back on, after the machine's own fonts, for
+/// Thai: the one script the interface speaks that the base fonts have no
+/// glyphs for. macOS lends every other script from its own fonts. It is the
+/// static Regular instance from the notofonts release, unhinted, cut with
+/// fonttools' `pyftsubset` to the script's whole basic block, Latin-1, the general
 /// punctuation, U+25CC (the dotted circle the shaper puts under a mark
 /// with nothing to sit on) and every character the shipped locales use,
 /// with every layout feature kept so the joining and conjuncts still shape:
@@ -417,14 +383,7 @@ pub const NOTO_SANS_THAI: &[u8] = include_bytes!("../fonts/NotoSansThai-Concat.t
 ///
 /// The licences are `fonts/LICENSE-<face>.txt`. The window registers the
 /// same bytes as its interface's fallbacks (concat's fonts.rs).
-pub const SCRIPT_FALLBACKS: [&[u8]; 6] = [
-    NOTO_SANS_CJK_SC,
-    NOTO_SANS_ARABIC_UI,
-    NOTO_SANS_HEBREW,
-    NOTO_SANS_DEVANAGARI,
-    NOTO_SANS_BENGALI,
-    NOTO_SANS_THAI,
-];
+pub const SCRIPT_FALLBACKS: [&[u8]; 1] = [NOTO_SANS_THAI];
 
 /// Faces that used to be bundled and no longer are: a document that names
 /// one is painted in the bundled face, not in whatever the system offers
@@ -448,12 +407,6 @@ impl Fonts {
             // fontdb knows a desk's font folders and not a phone's, so on a
             // phone the system had lent titles nothing: every script the
             // bundled faces lack was boxes.
-            #[cfg(target_os = "android")]
-            for dir in ["/system/fonts", "/product/fonts"] {
-                db.load_fonts_dir(dir);
-            }
-            #[cfg(target_os = "ios")]
-            db.load_fonts_dir("/System/Library/Fonts");
         }
         for face in BUNDLED.iter().chain(BASE_FONTS.iter()) {
             db.load_font_data(face.to_vec());
@@ -2882,24 +2835,15 @@ mod tests {
         assert!(opaque_pixels(&out.png) > 100);
     }
 
-    /// A caption in any language the app speaks draws its words with the
-    /// bundled faces alone, as on a phone whose fonts lend nothing: every
-    /// character lands on a face that has a glyph for it, never on a box.
+    /// A caption in Thai, or in a Latin, Cyrillic, Greek or Hebrew script,
+    /// draws its words with the bundled faces alone: every character lands
+    /// on a face that has a glyph for it, never on a box.
     #[test]
-    fn every_language_the_app_speaks_draws_without_the_machines_fonts() {
+    fn the_bundled_scripts_draw_without_the_machines_fonts() {
         let fonts = Fonts::with_system(false);
         let lines = [
             ("Thai", "สวัสดีครับ ยินดีต้อนรับสู่คำบรรยาย"),
-            ("Arabic", "مرحبا بك في الترجمة"),
-            ("Persian", "سلام، به زیرنویس خوش آمدید"),
-            ("Urdu", "خوش آمدید، یہ سب ٹائٹل ہے"),
             ("Hebrew", "שלום, ברוכים הבאים לכתוביות"),
-            ("Hindi", "नमस्ते, उपशीर्षक में आपका स्वागत है"),
-            ("Bengali", "হ্যালো, সাবটাইটেলে স্বাগতম"),
-            ("Korean", "안녕하세요, 자막에 오신 것을 환영합니다"),
-            ("Simplified Chinese", "你好，欢迎使用字幕"),
-            ("Traditional Chinese", "你好，歡迎使用字幕"),
-            ("Japanese", "こんにちは、字幕へようこそ。カタカナ"),
             ("Russian", "Привет, добро пожаловать в субтитры"),
             ("Ukrainian", "Привіт, ласкаво просимо до субтитрів ґ є ї"),
             ("Vietnamese", "Xin chào, chào mừng đến với phụ đề ữ ỵ ẫ"),

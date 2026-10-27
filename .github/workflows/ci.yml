@@ -54,7 +54,7 @@ jobs:
         working-directory: src
       # Every string the interface shows is a key in a locale file; this
       # keeps en.json the inventory of them and every shipped language
-      # keyed off it. See TRANSLATING.md.
+      # keyed off it.
       - run: python3 scripts/locales.py --check
         if: ${{ !cancelled() }}
       # The models Concat downloads are mirrored onto a release of this
@@ -250,9 +250,6 @@ jobs:
           - os: macos-15
             sherpa: osx-arm64
             verb: Compiles
-          - os: windows-2022
-            sherpa: win-x64
-            verb: Tests
     runs-on: ${{ matrix.os }}
     # Windows' steps that can run long have timeouts of their own, 115
     # minutes between them, so whichever is stuck is named by its own

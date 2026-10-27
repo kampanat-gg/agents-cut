@@ -8,9 +8,8 @@
 //! in [`studio`]. The state reads the engine's project and writes commands
 //! to it; nothing here decides what an edit means.
 //!
-//! A library so that every entry point is a few lines: `main.rs` on the
-//! desktop and on iOS, and the `concat-android` activity on Android. Each
-//! one calls [`run`].
+//! A library so that the entry point, `main.rs`, is a few lines: it calls
+//! [`run`].
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -40,25 +39,10 @@ mod gpu;
 mod grading;
 mod host;
 mod i18n;
-/// The iPhone's pickers and its way to Photos; see the module.
-#[cfg(target_os = "ios")]
-mod ios;
 mod keymap;
 mod meters;
-mod platform;
-/// What a phone's own crate installs before the window runs: the way to
-/// the system's file picker, and where a finished export is put so the
-/// phone shows it. See `platform::pick_files_async` and
-/// `platform::publish_export`.
-#[cfg(any(target_os = "android", target_os = "ios"))]
-pub use platform::{
-    ExportPublisher, FilePicker, PickKinds, install_export_publisher, install_file_picker,
-};
-#[cfg(target_os = "android")]
-pub use platform::{LinkOpener, install_link_opener};
-#[cfg(any(target_os = "android", target_os = "ios"))]
-pub use platform::{MicrophoneAccess, install_microphone_access};
 mod panes;
+mod platform;
 mod prefs;
 mod presets;
 mod source;
@@ -70,7 +54,7 @@ mod sysinfo;
 mod wayland_drop;
 /// Elsewhere the listener is a name that starts nothing, so platform.rs
 /// reads the same on every desktop.
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
+#[cfg(not(target_os = "linux"))]
 mod wayland_drop {
     /// Nothing to listen to: no desktop but Linux draws through Wayland.
     pub struct Listener;
@@ -198,8 +182,6 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     // What Import and a finished export reach on an iPhone. Android's own
     // crate installs its; iOS runs this crate's binary, so it is here.
     // https://github.com/jub0t/Concat/issues/332
-    #[cfg(target_os = "ios")]
-    ios::install();
 
     // The interface scale: a percent of the display's own, applied once
     // the window is up and kept through moves between monitors; see
@@ -317,30 +299,16 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     fonts::register();
     let app = App::new()?;
     app.set_macos(platform::MACOS);
-    // A phone wears the phone shell - see ui/phone/ - and its lanes keep
-    // the playhead at their middle; the strip and the dock are the desk's.
-    let phone = platform::phone();
-    app.set_phone(phone);
-    // The launch screen's version line, and whether its drop zone is
-    // offered: a drag in from the system is a desk's (see platform.rs).
+    // The launch screen's version line.
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
-    app.set_can_drop(cfg!(not(any(target_os = "android", target_os = "ios"))));
 
     // The user's own packages - imported looks, and any effect folder they
     // or the community wrote - sit beside the built-ins from the first
     // frame. One that will not load is skipped, and its reason is the
     // first thing the window says.
     let mut studio = Studio::new(host);
-    studio.set_phone(phone);
     if safe {
-        // Each key in a call of its own: scripts/locales.py finds a key by
-        // the literal inside `t(...)`, and one held in a variable is lost.
-        let notice = if cfg!(target_os = "android") {
-            i18n::t("start.safeModePhone")
-        } else {
-            i18n::t("start.safeMode")
-        };
-        studio.notify(&notice, false);
+        studio.notify(&i18n::t("start.safeMode"), false);
     }
     studio.reload_packages(false);
     studio.watch_packages();
@@ -475,7 +443,6 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         editor.set_seats(ModelRc::from(models.seats.clone()));
         editor.set_dividers(ModelRc::from(models.dividers.clone()));
         app.set_recents(ModelRc::from(models.recents.clone()));
-        editor.set_text_presets(ModelRc::from(models.text_presets.clone()));
         editor.set_style_presets(ModelRc::from(models.style_presets.clone()));
         editor.set_language_presets(ModelRc::from(models.language_presets.clone()));
         editor.set_font_families(ModelRc::from(models.font_families.clone()));
@@ -817,7 +784,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     // Not on a phone or in the compact dock: there the two seats are the
     // monitor and the timeline, and a third would squeeze both.
     editor.on_key_mark_opened(on_dock!(|state| {
-        if !state.compact && !state.meters.phone && !state.dock.contains(PaneKind::Keyframes) {
+        if !state.compact && !state.dock.contains(PaneKind::Keyframes) {
             add_pane(&mut state, PaneKind::Keyframes);
         }
     }));
@@ -932,12 +899,6 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     });
     editor.on_media_activate(on_window!(|state, id: i32| {
         state.place_at_playhead(&format!("media:{id}"));
-    }));
-    editor.on_media_add_picked(on_window!(|state, at_end: bool| {
-        state.handle(Msg::Media(MediaMsg::AddPicked { at_end }));
-    }));
-    editor.on_media_clear_picks(on_window!(|state| {
-        state.handle(Msg::Media(MediaMsg::ClearPicks));
     }));
     editor.on_library_add_text(on_window!(|state, preset: SharedString| {
         state.place_at_playhead(&format!("text:{preset}:Title"));
@@ -1111,12 +1072,6 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     }));
     editor.on_scrubbed(on_lanes!(|state, seconds: f32| {
         state.scrub(seconds);
-    }));
-    editor.on_finger_held(on_lanes!(|state| {
-        state.finger_held();
-    }));
-    editor.on_finger_lifted(on_lanes!(|state| {
-        state.finger_lifted();
     }));
     editor.on_scrolled(on_lanes!(|state, seconds: f32| {
         state.handle(Msg::Timeline(TimelineMsg::Scrolled(seconds)));
@@ -1431,12 +1386,10 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
 
     // ── the monitor ──
     editor.on_seek(on_lanes!(|state, seconds: f32| {
-        state.stop_glide();
         state.pause();
         state.seek(seconds);
     }));
     editor.on_step_frames(on_lanes!(|state, frames: f32| {
-        state.stop_glide();
         state.pause();
         let fps = state.frame_rate().round().max(1.0);
         let at = (state.playhead * fps).round() + frames;
@@ -2637,15 +2590,6 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     // first, and the process then left without a save: the edits since the
     // last autosave were lost and the project's lock was left behind. A
     // desktop's every way out closes the project before the loop ends.
-    #[cfg(target_os = "android")]
-    Shell::with(|shell, _| {
-        let mut studio = shell.studio.borrow_mut();
-        if studio.session.is_some()
-            && let Err(error) = studio.close_project()
-        {
-            log::warn!("close: the activity ended and the project could not be saved: {error}");
-        }
-    });
     stop_exports();
     drop(startup_mark);
     leave(0);
@@ -2755,7 +2699,7 @@ const SAFE_AFTER: std::time::Duration = std::time::Duration::from_secs(15);
 /// launch, and the backend's fall back to OpenGL ES only catches a surface
 /// that fails to open (#507). A Mac has neither.
 fn safe_start() -> (Option<concat_host::jobs::Tripwire>, bool) {
-    if !cfg!(any(windows, target_os = "linux", target_os = "android")) {
+    if !cfg!(any(windows, target_os = "linux")) {
         return (None, false);
     }
     let Ok(dirs) = concat_host::AppDirs::locate() else {
@@ -2912,8 +2856,16 @@ mod tests {
     #[test]
     fn a_failed_save_keeps_the_real_session_and_its_edit() {
         let scratch = Scratch::new("session");
-        let info = projects::create(&scratch.location(), "Closing", 1920, 1080, 30, 1, [0, 0, 0, 255])
-            .expect("creates the project");
+        let info = projects::create(
+            &scratch.location(),
+            "Closing",
+            1920,
+            1080,
+            30,
+            1,
+            [0, 0, 0, 255],
+        )
+        .expect("creates the project");
         let manifest = projects::manifest_path(Path::new(&info.path));
 
         // A real session, saved once; then an edit that lives in memory
@@ -2990,8 +2942,16 @@ mod tests {
     #[test]
     fn a_delayed_autosave_cannot_replace_the_close_snapshot() {
         let scratch = Scratch::new("ordered-close");
-        let info = projects::create(&scratch.location(), "Ordered", 1920, 1080, 30, 1, [0, 0, 0, 255])
-            .expect("creates the project");
+        let info = projects::create(
+            &scratch.location(),
+            "Ordered",
+            1920,
+            1080,
+            30,
+            1,
+            [0, 0, 0, 255],
+        )
+        .expect("creates the project");
         let mut session = Session::open_info(&info).expect("opens the session");
         let (old_path, old_document) = session.prepare_save(None);
         let old_ticket = projects::ticket();

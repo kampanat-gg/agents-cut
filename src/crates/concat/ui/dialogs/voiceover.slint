@@ -138,7 +138,6 @@ component ChoiceRow inherits HorizontalLayout {
 export component VoiceoverPanel inherits Rectangle {
     in property <VoiceoverData> data;
     in property <[string]> devices;
-    in property <bool> phone;
     in property <length> inset-top;
     in property <length> inset-bottom;
     in property <length> inset-left;
@@ -190,7 +189,7 @@ export component VoiceoverPanel inherits Rectangle {
     // right, over the inspector, moved by however far its header has been
     // dragged - and kept wholly inside the window, the drag included, so
     // pulling it back from an edge moves it at once.
-    property <length> card-w: root.phone ? root.width - root.inset-left - root.inset-right : 340px;
+    property <length> card-w: 340px;
     property <length> home-x: root.width - root.card-w - 16px - root.inset-right;
     property <length> home-y: 48px + root.inset-top;
     property <length> dx;
@@ -205,10 +204,8 @@ export component VoiceoverPanel inherits Rectangle {
         : root.data.prompt-speed == 2 ? 22 : 14;
 
     card := Rectangle {
-        x: root.phone ? root.inset-left
-            : root.home-x + Math.max(root.min-dx, Math.min(root.max-dx, root.dx));
-        y: root.phone ? root.height - self.height - root.inset-bottom
-            : root.home-y + Math.max(root.min-dy, Math.min(root.max-dy, root.dy));
+        x: root.home-x + Math.max(root.min-dx, Math.min(root.max-dx, root.dx));
+        y: root.home-y + Math.max(root.min-dy, Math.min(root.max-dy, root.dy));
         width: root.card-w;
         height: body.preferred-height;
         background: Theme.panel;
@@ -218,8 +215,8 @@ export component VoiceoverPanel inherits Rectangle {
         // top only.
         border-top-left-radius: Theme.r-lg;
         border-top-right-radius: Theme.r-lg;
-        border-bottom-left-radius: root.phone ? 0 : Theme.r-lg;
-        border-bottom-right-radius: root.phone ? 0 : Theme.r-lg;
+        border-bottom-left-radius: Theme.r-lg;
+        border-bottom-right-radius: Theme.r-lg;
         drop-shadow-blur: 24px;
         drop-shadow-offset-y: 6px;
         drop-shadow-color: #00000059;
@@ -237,7 +234,7 @@ export component VoiceoverPanel inherits Rectangle {
             Rectangle {
                 height: 42px;
 
-                if !root.phone: TouchArea {
+                TouchArea {
                     mouse-cursor: move;
                     moved => {
                         if (self.pressed) {
@@ -538,7 +535,7 @@ export component VoiceoverPanel inherits Rectangle {
                 }
 
                 if root.show-prompt || root.data.prompt != "": Rectangle {
-                    height: root.phone ? 96px : 120px;
+                    height: 120px;
                     border-radius: Theme.r;
                     background: Theme.well;
                     border-width: 1px;

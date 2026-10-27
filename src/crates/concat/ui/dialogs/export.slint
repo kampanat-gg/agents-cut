@@ -260,9 +260,6 @@ component SummarySection inherits DialogSection {
 
 component DestinationSection inherits DialogSection {
     in property <ExportData> data;
-    /// A phone has no folder picker: the file goes where the path under
-    /// the field says, so there is no Browse to press.
-    in property <bool> phone;
 
     callback name-edited(name: string);
     callback browse();
@@ -276,7 +273,7 @@ component DestinationSection inherits DialogSection {
             edited(text) => { root.name-edited(text); }
         }
 
-        if !root.phone: Button {
+        Button {
             label: I18n.t("export.browse");
             glyph: Glyph.import;
             clicked => { root.browse(); }
@@ -433,8 +430,6 @@ component ExportFooter inherits VerticalLayout {
     /// The button runs the footer's width on a phone, and keeps to a
     /// button's width on a desk, where the width would make it a banner.
     in property <bool> narrow;
-    /// A phone has no file manager to show the file in.
-    in property <bool> phone;
 
     callback begin();
     callback cancel();
@@ -537,7 +532,7 @@ component ExportFooter inherits VerticalLayout {
         spacing: 6px;
         alignment: start;
 
-        if !root.phone: Button {
+        Button {
             label: I18n.t("export.showInFolder");
             glyph: Glyph.import;
             clicked => { root.reveal(); }
@@ -582,8 +577,6 @@ component Measure inherits HorizontalLayout {
 
 export component ExportDialog inherits Rectangle {
     in property <ExportData> data;
-    /// A finger drives it: the body scrolls under a drag as well as a wheel.
-    in property <bool> phone;
     /// How far the system's bars reach into the window (its
     /// safe-area-insets; zero on a desk). The sheet's panel runs behind
     /// them; its header, its body and its buttons stay inside (#353).
@@ -722,7 +715,6 @@ export component ExportDialog inherits Rectangle {
             // ── the groups ───────────────────────────────────────────────
             PaneScroll {
                 vertical-stretch: 1;
-                finger: root.phone;
 
                 Measure {
                     padding-top: 8px;
@@ -732,7 +724,6 @@ export component ExportDialog inherits Rectangle {
                         SummarySection { first: true; data: root.data; }
                         if !root.running: DestinationSection {
                             data: root.data;
-                            phone: root.phone;
                             name-edited(name) => { root.name-edited(name); }
                             browse => { root.browse(); }
                         }
@@ -766,7 +757,6 @@ export component ExportDialog inherits Rectangle {
                             SummarySection { data: root.data; }
                             DestinationSection {
                                 data: root.data;
-                                phone: root.phone;
                                 name-edited(name) => { root.name-edited(name); }
                                 browse => { root.browse(); }
                             }
@@ -827,7 +817,6 @@ export component ExportDialog inherits Rectangle {
                             DestinationSection {
                                 first: true;
                                 data: root.data;
-                                phone: root.phone;
                                 name-edited(name) => { root.name-edited(name); }
                                 browse => { root.browse(); }
                             }
@@ -849,7 +838,6 @@ export component ExportDialog inherits Rectangle {
                 ExportFooter {
                     data: root.data;
                     narrow: root.columns == 1;
-                    phone: root.phone;
                     begin => { root.begin(); }
                     cancel => { root.cancel(); }
                     reveal => { root.reveal(); }

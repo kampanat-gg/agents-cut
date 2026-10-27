@@ -51,7 +51,7 @@ import { SegmentedControl } from "primitives/segmented-control.slint";
 // - wide, a desk's window from 680px up: one centred column, the create
 //   row across it, the projects as a grid, and the learn cards as a panel
 //   beside the projects once the column is 1100px wide, under them before;
-// - narrow, a phone held upright: stacked the way a phone's own apps are -
+// - narrow, a window under 680px: stacked the way a phone's own apps are -
 //   New project across the width, the projects as a list of rows with the
 //   forget cross on every one, since there is no hover to reveal it with,
 //   and the learn cards as one grouped list at the foot. The sheet's labels
@@ -1536,8 +1536,7 @@ component VersionLine inherits HorizontalLayout {
 
 // The cards, and the words on them, in one place: the wide page lays them
 // as a column beside the projects or a grid under them, the narrow one as
-// a list. The phone has no Shortcuts page in its Settings, so it has no
-// card for one.
+// a list.
 global Learn {
     out property <LearnItem> docs: {
         name: "guides", glyph: Glyph.book, external: true,
@@ -1564,7 +1563,6 @@ global Learn {
         title: I18n.t("start.reportProblem"), note: I18n.t("start.reportProblemNote"),
     };
     out property <[LearnItem]> desk: [docs, guide, keys, code, chat, report];
-    out property <[LearnItem]> phone: [docs, guide, code, chat, report];
 }
 
 // The learn cards as a grid of rows, for the wide page under the projects
@@ -1607,7 +1605,6 @@ component WideHome inherits Rectangle {
     in property <int> sort;
     in property <bool> busy;
     in property <string> version;
-    in property <bool> can-drop;
 
     callback compose();
     callback open();
@@ -1629,7 +1626,7 @@ component WideHome inherits Rectangle {
     property <length> main-w: root.aside ? root.content-w - root.aside-w - root.aside-gap
         : root.content-w;
     /// The drop tile, beside New and Open, where they still have room.
-    property <bool> drop-tile: root.can-drop && root.main-w >= 940px;
+    property <bool> drop-tile: root.main-w >= 940px;
     /// The create row shares its width by weight - New a third again as
     /// wide as the others - and not by what its words would like, so a
     /// longer line on one tile does not shoulder the others aside.
@@ -1714,7 +1711,7 @@ component WideHome inherits Rectangle {
                 }
 
                 // Where the tile does not fit, a line says what it would.
-                if root.can-drop && !root.drop-tile: VerticalLayout {
+                if !root.drop-tile: VerticalLayout {
                     padding-top: 12px;
                     Text {
                         text: I18n.t("start.dropHint");
@@ -1864,8 +1861,8 @@ component WideHome inherits Rectangle {
     }
 }
 
-// The narrow page: a phone held upright, or a desk's window squeezed that
-// far. Stacked the way a phone's own apps are - the greeting with Settings
+// The narrow page: a window squeezed under 680px. Stacked the way a
+// phone's own apps are - the greeting with Settings
 // beside it, New project across the width under the thumb, the projects as
 // a list, and the learn cards as one grouped list at the foot.
 component NarrowHome inherits Rectangle {
@@ -1874,10 +1871,6 @@ component NarrowHome inherits Rectangle {
     in property <string> query;
     in property <bool> busy;
     in property <string> version;
-    /// A phone: no folder picker, so no Open; projects live in the app's
-    /// own folder, which the page already lists. See platform::pick_folder.
-    /// https://github.com/jub0t/Concat/issues/222
-    in property <bool> phone;
 
     callback compose();
     callback open();
@@ -1922,7 +1915,7 @@ component NarrowHome inherits Rectangle {
                     wrap: word-wrap;
                 }
 
-                if !root.phone: VerticalLayout {
+                VerticalLayout {
                     alignment: center;
                     BarAction {
                         glyph: Glyph.folder;
@@ -2026,7 +2019,7 @@ component NarrowHome inherits Rectangle {
                 list := VerticalLayout {
                     padding: 6px;
 
-                    for item[index] in (root.phone ? Learn.phone : Learn.desk): VerticalLayout {
+                    for item[index] in Learn.desk: VerticalLayout {
                         if index > 0: Rectangle {
                             height: 1px;
                             background: Theme.line;
@@ -2067,9 +2060,6 @@ export component StartScreen inherits Rectangle {
     in property <bool> busy;
     /// "0.2.7"
     in property <string> version;
-    /// A file can be dragged in from the system here.
-    in property <bool> can-drop;
-    in property <bool> phone;
 
     /// Put up the sheet a new project is described on.
     callback compose();
@@ -2084,7 +2074,7 @@ export component StartScreen inherits Rectangle {
     /// One of the page's links, by name; see `start::link` in Rust.
     callback link(name: string);
 
-    property <bool> narrow: root.phone || root.width < 680px;
+    property <bool> narrow: root.width < 680px;
 
     background: Theme.launch-page;
     clip: true;
@@ -2098,7 +2088,6 @@ export component StartScreen inherits Rectangle {
         sort: root.sort;
         busy: root.busy;
         version: root.version;
-        can-drop: root.can-drop;
         compose => { root.compose(); }
         open => { root.open(); }
         open-recent(path) => { root.open-recent(path); }
@@ -2117,7 +2106,6 @@ export component StartScreen inherits Rectangle {
         query: root.query;
         busy: root.busy;
         version: root.version;
-        phone: root.phone;
         compose => { root.compose(); }
         open => { root.open(); }
         open-settings => { root.open-settings(); }
@@ -2162,14 +2150,8 @@ export component NewProjectDialog inherits Modal {
     callback create();
     callback dismiss-error();
 
-    /// A phone held upright: every label over its value, every chip row
-    /// across the width, the button across the width with its line under
-    /// it.
-    /// A phone: no folder picker, so no Open and no Choose - projects live
-    /// in the app's own folder, which the page already lists, and the
-    /// location is shown rather than typed. See platform::pick_folder.
-    /// https://github.com/jub0t/Concat/issues/222
-    in property <bool> phone;
+    /// Narrow: every label over its value, every chip row across the
+    /// width, the button across the width with its line under it.
     property <bool> narrow: root.width < 680px;
     /// A project needs somewhere to go. Everything else has a default.
     property <bool> can-create: !root.data.busy && root.data.location != "";
@@ -2250,10 +2232,7 @@ export component NewProjectDialog inherits Modal {
             }
         }
 
-        // A desk's question. A phone keeps its projects in the app's own
-        // folder, as every phone editor does, and a path there is nothing
-        // anybody can browse to, so the row is not shown.
-        if !root.phone: FormRow {
+        FormRow {
             label: I18n.upper("start.location");
             stacked: root.narrow;
 

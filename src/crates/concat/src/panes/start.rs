@@ -175,21 +175,8 @@ impl Default for StartPane {
 }
 
 /// Where a new project goes unless told otherwise; see [`location_on`].
-/// On an iPhone the folder is made here, so that the Files app shows it
-/// from the first launch and not only from the first project.
 fn default_location() -> String {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    let desktop = dirs::desktop_dir();
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    let desktop = None;
-    let location = location_on(std::env::consts::OS, desktop, home_folder);
-    if cfg!(target_os = "ios")
-        && !location.is_empty()
-        && let Err(error) = std::fs::create_dir_all(&location)
-    {
-        log::warn!("could not make {location}: {error}");
-    }
-    location
+    location_on(std::env::consts::OS, dirs::desktop_dir(), home_folder)
 }
 
 /// Where a new project goes on `os`: a Concat folder on the desktop. The
@@ -525,7 +512,12 @@ impl StartPane {
             size: self.size as i32,
             rate: self.rate as i32,
             size_readout: format!("{width} x {height}").into(),
-            canvas: slint::Color::from_argb_u8(self.canvas[3], self.canvas[0], self.canvas[1], self.canvas[2]),
+            canvas: slint::Color::from_argb_u8(
+                self.canvas[3],
+                self.canvas[0],
+                self.canvas[1],
+                self.canvas[2],
+            ),
             custom_width: width as f32,
             custom_height: height as f32,
             custom_fps: fps_of(num, den) as f32,
