@@ -80,7 +80,7 @@ import { TooltipLayer } from "primitives/tooltip.slint";
 import { FontSearch } from "inspector/font-picker.slint";
 import { Meters } from "timeline/vu-meter.slint";
 import { Workspace } from "workspace/workspace.slint";
-import { Agent, AgentRail, AgentRow, AgentSidebar } from "agent.slint";
+import { Agent, AgentRail, AgentRow, AgentSidebar, AgentStarter } from "agent.slint";
 import {
     Backdrop,
     BackdropData,
@@ -113,6 +113,7 @@ import { SpeedRamp } from "inspector/speed-ramp.slint";
 export {
     Agent,
     AgentRow,
+    AgentStarter,
     Curves,
     Fmt,
     Focus,
@@ -258,6 +259,7 @@ export component App inherits Window {
     callback start-name-edited(name: string);
     callback start-location-edited(path: string);
     callback start-browse();
+    callback start-style-changed(index: int);
     callback start-aspect-changed(index: int);
     callback start-size-changed(index: int);
     callback start-rate-changed(index: int);
@@ -908,6 +910,7 @@ export component App inherits Window {
         name-edited(name) => { root.start-name-edited(name); }
         location-edited(path) => { root.start-location-edited(path); }
         browse => { root.start-browse(); }
+        style-changed(index) => { root.start-style-changed(index); }
         aspect-changed(index) => { root.start-aspect-changed(index); }
         size-changed(index) => { root.start-size-changed(index); }
         rate-changed(index) => { root.start-rate-changed(index); }

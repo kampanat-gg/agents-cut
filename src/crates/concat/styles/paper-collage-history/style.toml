@@ -1,0 +1,36 @@
+# A style: what a new project made with it starts as. The folder's
+# CLAUDE.md is copied into the project, where the agent reads it.
+
+name = "Paper-collage history"
+name_th = "ประวัติศาสตร์กระดาษตัดแปะ"
+description = "Vertical history stories: archival photos cut out on aged paper, dates on paper strips, a red accent. For people and events from the past."
+description_th = "คลิปเล่าประวัติแนวตั้ง ภาพเก่าตัดแปะบนกระดาษเก่า ป้ายวันที่ สีแดงเป็นจุดเด่น สำหรับเล่าเรื่องบุคคลและเหตุการณ์ในอดีต"
+aspect = "9:16"
+
+# The sidebar's buttons. `fill` puts the prompt in the box for the user to
+# finish (a topic, a name); without it the button sends the prompt as is.
+[[starters]]
+label = "New episode from a topic"
+label_th = "ทำตอนใหม่จากหัวข้อ"
+prompt = "Make a new episode about: "
+prompt_th = "ทำตอนใหม่เรื่อง: "
+fill = true
+
+[[starters]]
+label = "Write 5 hooks for this episode"
+label_th = "คิด hook 5 แบบให้ตอนนี้"
+prompt = "Write 5 hook options for the episode on the active timeline, in this style's voice. Do not edit anything yet."
+prompt_th = "คิด hook 5 แบบสำหรับตอนใน timeline ที่เปิดอยู่ ตามสไตล์ของช่องนี้ ยังไม่ต้องแก้อะไร"
+
+[[starters]]
+label = "Add the paper background"
+label_th = "ใส่พื้นหลังกระดาษ"
+prompt = "Put this style's paper background under the whole active timeline."
+prompt_th = "ใส่พื้นหลังกระดาษของสไตล์นี้ใต้ทั้ง timeline ที่เปิดอยู่"
+
+[[starters]]
+label = "Date title card"
+label_th = "ทำการ์ดวันที่"
+prompt = "Make a date title card at the playhead for: "
+prompt_th = "ทำการ์ดวันที่ตรงหัวเล่นสำหรับ: "
+fill = true

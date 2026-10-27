@@ -8719,6 +8719,12 @@ impl Studio {
                     log::info!("{swept} stale proxies swept from {}", project_dir.display());
                 }
                 self.session = Some(session);
+                // A new project, a new conversation, and its style's
+                // buttons in the sidebar.
+                self.agent.new_chat();
+                let folder =
+                    std::path::PathBuf::from(self.session.as_ref().map_or("", |s| s.path()));
+                self.agent.load_style(&folder);
                 // The relink dialog belongs to the project that opened it;
                 // this project's own check follows below.
                 self.relink = Default::default();

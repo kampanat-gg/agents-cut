@@ -31,7 +31,7 @@ use slint::{ComponentHandle, Model, VecModel};
 use crate::host::Shell;
 use crate::i18n::{t, tf};
 use crate::studio::Studio;
-use crate::ui::{Agent, AgentRow, App};
+use crate::ui::{Agent, AgentRow, AgentStarter, App};
 
 /// The tools the agent may call: the editor's, and of the machine's only
 /// `codex exec`, for pictures, and reading inside the project's folder,
@@ -89,6 +89,8 @@ struct Turn {
 /// The conversation, and the process behind it.
 pub struct Chat {
     rows: Rc<VecModel<AgentRow>>,
+    /// The open project's style's buttons, empty without a style.
+    starters: Rc<VecModel<AgentStarter>>,
     /// The Claude session to resume, once the first turn has named one.
     session: Option<String>,
     turn: Option<Turn>,
@@ -106,6 +108,7 @@ impl Default for Chat {
     fn default() -> Self {
         Chat {
             rows: Rc::new(VecModel::default()),
+            starters: Rc::new(VecModel::default()),
             session: None,
             turn: None,
             epoch: 0,
@@ -126,6 +129,30 @@ impl Chat {
     /// The rows, handed to the sidebar once.
     pub fn rows(&self) -> Rc<VecModel<AgentRow>> {
         Rc::clone(&self.rows)
+    }
+
+    /// The style buttons, handed to the sidebar once.
+    pub fn starters(&self) -> Rc<VecModel<AgentStarter>> {
+        Rc::clone(&self.starters)
+    }
+
+    /// Shows the buttons of the style the project at `folder` was made
+    /// with, in the interface's language; none for a project without one.
+    pub fn load_style(&mut self, folder: &Path) {
+        let starters: Vec<AgentStarter> = crate::styles::of_project(folder)
+            .map(|style| {
+                style
+                    .starters
+                    .iter()
+                    .map(|starter| AgentStarter {
+                        label: starter.label().into(),
+                        prompt: starter.prompt().into(),
+                        fill: starter.fill,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        self.starters.set_vec(starters);
     }
 
     pub fn busy(&self) -> bool {

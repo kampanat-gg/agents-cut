@@ -16,11 +16,21 @@ export struct AgentRow {
     state: int,
 }
 
+/// One of the style's buttons: a prompt sent as it is, or with `fill`
+/// put in the box for the user to finish.
+export struct AgentStarter {
+    label: string,
+    prompt: string,
+    fill: bool,
+}
+
 // The agent beside the editor: what it and the user have said, and the
 // tools it called on the project. The conversation and the process behind
 // it are Rust's (see agent.rs); this draws the rows and reports a send.
 export global Agent {
     in-out property <[AgentRow]> rows;
+    /// The open project's style's buttons; empty without a style.
+    in-out property <[AgentStarter]> starters;
     /// A turn is running: the send button is a stop button.
     in-out property <bool> busy;
     /// The sidebar is open; closed, it is a strip with a button.
@@ -176,6 +186,29 @@ export component AgentSidebar inherits Rectangle {
         width: root.width;
         height: root.height - 44px - box.height;
 
+        flick := Flickable {
+            content-height: root.content-h + 16px;
+            content-width: self.width;
+
+            flicked => {
+                root.follow = self.content-y <= self.height - root.content-h - 16px + 24px;
+            }
+
+            list := VerticalLayout {
+                x: 12px;
+                y: 8px;
+                width: flick.width - 24px;
+                height: self.preferred-height;
+                spacing: 8px;
+
+                for row in Agent.rows: Bubble {
+                    data: row;
+                }
+            }
+        }
+
+        // Over the conversation, which is empty while this shows: declared
+        // after it so its buttons are what a press lands on.
         if Agent.rows.length == 0: VerticalLayout {
             width: parent.width;
             height: parent.height;
@@ -199,25 +232,44 @@ export component AgentSidebar inherits Rectangle {
                 horizontal-alignment: center;
                 wrap: word-wrap;
             }
-        }
 
-        flick := Flickable {
-            content-height: root.content-h + 16px;
-            content-width: self.width;
-
-            flicked => {
-                root.follow = self.content-y <= self.height - root.content-h - 16px + 24px;
+            // The style's buttons: a request without writing one.
+            if Agent.starters.length > 0: Text {
+                text: I18n.t("agent.quickStart");
+                color: Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                horizontal-alignment: center;
             }
 
-            list := VerticalLayout {
-                x: 12px;
-                y: 8px;
-                width: flick.width - 24px;
-                height: self.preferred-height;
-                spacing: 8px;
+            for starter in Agent.starters: Rectangle {
+                height: 34px;
+                background: chip.has-hover ? Theme.field-hover : Theme.field;
+                border-radius: Theme.r;
+                border-width: 1px;
+                border-color: Theme.line;
 
-                for row in Agent.rows: Bubble {
-                    data: row;
+                Text {
+                    x: 12px;
+                    width: parent.width - 24px;
+                    text: starter.label;
+                    color: Theme.fg;
+                    font-size: Theme.fs;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                chip := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        if (starter.fill) {
+                            draft.text = starter.prompt;
+                            draft.focus();
+                            draft.set-selection-offsets(1000000, 1000000);
+                        } else if (!Agent.busy) {
+                            root.follow = true;
+                            Agent.send(starter.prompt);
+                        }
+                    }
                 }
             }
         }

@@ -49,6 +49,7 @@ mod presets;
 mod source;
 mod speed_ramp;
 mod studio;
+mod styles;
 mod sysinfo;
 /// Native Wayland file drops, which winit does not report; see the module.
 #[cfg(target_os = "linux")]
@@ -666,6 +667,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     {
         let agent = app.global::<ui::Agent>();
         agent.set_rows(ModelRc::from(shell.studio.borrow().agent.rows()));
+        agent.set_starters(ModelRc::from(shell.studio.borrow().agent.starters()));
         agent.on_send(on_window!(|state, text: SharedString| {
             agent::send(&mut state, text.to_string());
         }));
@@ -692,6 +694,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     }));
     app.on_start_location_edited(on_window!(|state, path: SharedString| {
         state.handle(Msg::Start(StartMsg::LocationEdited(path.to_string())));
+    }));
+    app.on_start_style_changed(on_window!(|state, index: i32| {
+        state.handle(Msg::Start(StartMsg::StyleChanged(index)));
     }));
     app.on_start_aspect_changed(on_window!(|state, index: i32| {
         state.handle(Msg::Start(StartMsg::AspectChanged(index)));

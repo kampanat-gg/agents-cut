@@ -116,6 +116,12 @@ export struct StartData {
     composing: bool,
     name: string,
     location: string,
+    /// The style a new project starts as: 0 none, then the built-in ones,
+    /// whose names, in the interface's language, are `style-options`.
+    style: int,
+    style-options: [ChipOption],
+    /// What the chosen style makes, in a sentence.
+    style-note: string,
     /// Index into `aspects`; the ratio behind it is Rust's.
     aspect: int,
     /// Index into `sizes`.
@@ -2140,6 +2146,7 @@ export component NewProjectDialog inherits Modal {
     callback name-edited(name: string);
     callback location-edited(path: string);
     callback browse();
+    callback style-changed(index: int);
     callback aspect-changed(index: int);
     callback size-changed(index: int);
     callback rate-changed(index: int);
@@ -2216,6 +2223,32 @@ export component NewProjectDialog inherits Modal {
                 color: Theme.fg;
                 font-size: Theme.fs;
                 wrap: word-wrap;
+            }
+        }
+
+        // The style first: it decides the frame below, and what the
+        // project is for.
+        FormRow {
+            label: I18n.upper("start.style");
+            stacked: root.narrow;
+
+            VerticalLayout {
+                spacing: 8px;
+
+                ChipRow {
+                    options: root.data.style-options;
+                    current: root.data.style;
+                    enabled: !root.data.busy;
+                    block: root.narrow;
+                    changed(index) => { root.style-changed(index); }
+                }
+
+                Text {
+                    text: root.data.style-note;
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs;
+                    wrap: word-wrap;
+                }
             }
         }
 
