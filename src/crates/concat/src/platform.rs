@@ -140,6 +140,8 @@ struct DropHandler {
     edges: bool,
     /// The edge the pointer is on, while it is on one.
     edge: Option<ResizeDirection>,
+    /// The platform's shortcut key (Command on macOS) is held.
+    command: bool,
 }
 
 use slint::winit_030::winit::window::{CursorIcon, ResizeDirection};
@@ -201,8 +203,40 @@ impl DropHandler {
             on_exiting: Box::new(on_exiting),
             edges: cfg!(not(any(target_os = "macos", target_os = "windows"))),
             edge: None,
+            command: false,
         }
     }
+}
+
+/// The Latin letter a shortcut press stands for, when the keyboard
+/// layout typed something else: with a Thai, Russian or Greek layout,
+/// Command-V arrives as that layout's letter for the key, and Slint's text
+/// fields, which match copy, paste, cut, select-all and undo by letter, do
+/// nothing. The key's place on the keyboard is what the platform's own
+/// apps go by, so the letter is read from that. `None` when the press
+/// already carries a Latin letter, or is not a letter key.
+fn shortcut_letter(key: &slint::winit_030::winit::event::KeyEvent) -> Option<char> {
+    use slint::winit_030::winit::keyboard::{KeyCode, PhysicalKey};
+    if key.text.as_deref().is_some_and(|text| text.is_ascii())
+        || key
+            .logical_key
+            .to_text()
+            .is_some_and(|text| text.is_ascii())
+    {
+        return None;
+    }
+    let PhysicalKey::Code(code) = key.physical_key else {
+        return None;
+    };
+    Some(match code {
+        KeyCode::KeyA => 'a',
+        KeyCode::KeyC => 'c',
+        KeyCode::KeyV => 'v',
+        KeyCode::KeyX => 'x',
+        KeyCode::KeyY => 'y',
+        KeyCode::KeyZ => 'z',
+        _ => return None,
+    })
 }
 
 /// Whether a press at (`x`, `y`), in logical pixels of `window`, lands
@@ -253,6 +287,26 @@ impl CustomApplicationHandler for DropHandler {
             self.wayland = listen_for_wayland_drops(window, &self.arrived);
         }
         match event {
+            WindowEvent::ModifiersChanged(modifiers) => {
+                self.command = if cfg!(target_os = "macos") {
+                    modifiers.state().super_key()
+                } else {
+                    modifiers.state().control_key()
+                };
+            }
+            // A shortcut typed on a non-Latin layout, handed on as the
+            // Latin letter of its key; see `shortcut_letter`.
+            WindowEvent::KeyboardInput { event: key, .. } if self.command => {
+                if let (Some(window), Some(letter)) = (slint_window, shortcut_letter(key)) {
+                    let text = slint::SharedString::from(letter.to_string());
+                    window.dispatch_event(if key.state == ElementState::Pressed {
+                        slint::platform::WindowEvent::KeyPressed { text }
+                    } else {
+                        slint::platform::WindowEvent::KeyReleased { text }
+                    });
+                    return EventResult::PreventDefault;
+                }
+            }
             WindowEvent::ScaleFactorChanged { .. } => reapply_ui_scale(std::time::Duration::ZERO),
             WindowEvent::DroppedFile(path) => self.pending.push(path.clone()),
             // Back at the front, after Explorer or the file manager: what a
