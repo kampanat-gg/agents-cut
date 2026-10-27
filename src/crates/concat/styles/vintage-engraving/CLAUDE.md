@@ -33,6 +33,16 @@ think" when it is not settled.
   cross-hatching, hand-tinted lithograph, muted indigo and sepia, natural
   history book plate,`
 
+## Motion sequences
+
+Plan the layers as the brief says: the sea is a still with water ripple and
+sliding wave bands, weather is an effect layer, and only a creature or a
+breaking wave is drawn frame by frame. For a creature or the sea that should really move (tentacles curling, a wave
+breaking, a jellyfish pulsing, a whale's tail), make a motion sequence (see
+the brief): 12 frames at 12 a second, looping, over a still backdrop. One or
+two per episode, on the beats that matter most; the rest stays paper-puppet
+keyframes.
+
 ## Layers on the timeline
 
 Backdrop, far elements (light rays, rock, cloud), subjects, near elements

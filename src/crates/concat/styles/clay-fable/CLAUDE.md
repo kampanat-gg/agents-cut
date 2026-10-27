@@ -15,8 +15,9 @@ passes those with `-i`, so they stay the same figure.
 - A pose change is an edit of the previous picture, not a new one: pass the
   last pose with `-i` and change only the arms, head or expression. The set
   and the figure's place stay put, so cuts do not jump.
-- Key actions (a step, a wave, a jump) as 3 to 6 poses, each held for 2
-  frames at 24 fps (12 pictures a second), laid with clips in sequence.
+- Key actions (a step, a wave, a jump) as a motion sequence (see the
+  brief): key poses edited from the figure's reference, in-betweens
+  between them, joined at 12 pictures a second into one clip.
 - Between actions, hold a pose and add a tiny breathing move (scale 100 to
   101 percent) so it never looks frozen.
 

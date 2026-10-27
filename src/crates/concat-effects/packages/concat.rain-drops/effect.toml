@@ -1,0 +1,49 @@
+format = 2
+
+[effect]
+id = "concat.rain-drops"
+name = "Rain Drops"
+kind = "effect"
+category = "Elements"
+order = 60
+intensity = "amount"
+description = "Rain falling over the picture: thin bright streaks at an angle, in three depths. Put it on an effect layer above a scene."
+
+[[param]]
+key = "amount"
+label = "Amount"
+min = 0
+max = 100
+default = 60
+step = 1
+unit = "%"
+
+[[param]]
+key = "speed"
+label = "Speed"
+min = 10
+max = 200
+default = 100
+step = 1
+unit = "%"
+
+[[param]]
+key = "angle"
+label = "Angle"
+min = -40
+max = 40
+default = 12
+step = 1
+unit = "°"
+
+[[param]]
+key = "length"
+label = "Length"
+min = 10
+max = 100
+default = 45
+step = 1
+unit = "%"
+
+[wgsl]
+entry = "effect.wgsl"

@@ -19,6 +19,13 @@ mascot that explains things, or a pet with a personality.
 - Motion: bouncy. Pops in with overshoot (scale 0 to 110 to 100 percent),
   squash on landing, small head tilts (rotation), a hop on key words.
 
+## Motion sequences
+
+For a wave, a jump, a happy wiggle or a pet's tail, a motion sequence (see
+the brief), 8 to 12 frames, edited from the character's reference so it
+stays the same character. Use one for the reaction at the start and keep
+the rest bouncy keyframes.
+
 ## The look
 
 - Soft 3D animated-film look: rounded shapes, big expressive eyes, soft

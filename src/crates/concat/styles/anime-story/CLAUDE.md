@@ -34,6 +34,13 @@ Keep camera, head and gaze separate: a low camera does not mean looking up.
   (small keyframed rotation and position), light flickers through leaves
   (opacity). A cut on every line of narration or lyric.
 
+## Motion sequences
+
+For the shot an episode turns on, a motion sequence (see the brief) instead
+of a still: hair and a scarf in the wind, a character turning their head,
+rain on a window, petals falling. 8 to 12 frames at 12 a second, only the
+moving layer drawn per frame. At most one or two per episode.
+
 ## The look
 
 - Hand-painted backgrounds, soft golden-hour or blue-hour light, gentle

@@ -1,0 +1,49 @@
+format = 2
+
+[effect]
+id = "concat.drifting-fog"
+name = "Drifting Fog"
+kind = "effect"
+category = "Elements"
+order = 62
+intensity = "amount"
+description = "Banks of fog or cloud drifting slowly across the picture, thicker toward the bottom or the top. For mist over the sea, clouds over a city, smoke."
+
+[[param]]
+key = "amount"
+label = "Amount"
+min = 0
+max = 100
+default = 35
+step = 1
+unit = "%"
+
+[[param]]
+key = "scale"
+label = "Scale"
+min = 10
+max = 100
+default = 50
+step = 1
+unit = "%"
+
+[[param]]
+key = "speed"
+label = "Speed"
+min = 0
+max = 200
+default = 60
+step = 1
+unit = "%"
+
+[[param]]
+key = "height"
+label = "Height"
+min = -100
+max = 100
+default = -40
+step = 1
+unit = "%"
+
+[wgsl]
+entry = "effect.wgsl"

@@ -15,6 +15,13 @@ at dusk. No story, no hook text. Often under a song.
 - If the character is in the scene, they do one small repeating action:
   breathing, turning a page, a nod.
 
+## Motion sequences
+
+Rain, steam, a flickering candle or the character's small action can be a
+short looping motion sequence (see the brief), 8 frames at 8 a second, its
+last frame leading back to its first, placed again and again for the whole
+loop.
+
 ## The look
 
 - Soft, warm, slightly grainy, low contrast; warm lamp light against a cool
