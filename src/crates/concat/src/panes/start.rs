@@ -537,18 +537,22 @@ impl StartPane {
             name: self.name.as_str().into(),
             location: self.location.as_str().into(),
             style: self.style as i32,
-            style_options: slint::ModelRc::from(std::rc::Rc::new(slint::VecModel::from(
-                std::iter::once(t("start.noStyle"))
-                    .chain(
-                        crate::styles::all()
-                            .iter()
-                            .map(|style| style.settings.name().to_owned()),
-                    )
-                    .map(|label| crate::ui::ChipOption {
-                        label: label.into(),
-                        ratio: 0.0,
-                    })
-                    .collect::<Vec<_>>(),
+            style_cards: slint::ModelRc::from(std::rc::Rc::new(slint::VecModel::from(
+                std::iter::once(crate::ui::StyleCard {
+                    label: t("start.noStyle").into(),
+                    preview: slint::Image::default(),
+                    has_preview: false,
+                })
+                .chain(
+                    crate::styles::all()
+                        .iter()
+                        .map(|style| crate::ui::StyleCard {
+                            label: style.settings.name().into(),
+                            preview: style.preview(),
+                            has_preview: true,
+                        }),
+                )
+                .collect::<Vec<_>>(),
             ))),
             style_note: self
                 .style

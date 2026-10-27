@@ -24,21 +24,22 @@ pub const SETTINGS: &str = "style.toml";
 /// characters to keep the same, and what the user brings.
 const FOLDERS: [&str; 3] = ["generated", "characters", "assets"];
 
-/// One built-in style's folder name, settings and recipe, read in at
-/// build time.
+/// One built-in style's folder name, settings, recipe and preview
+/// picture, read in at build time.
 macro_rules! style {
     ($id:literal) => {
         (
             $id,
             include_str!(concat!("../styles/", $id, "/style.toml")),
             include_str!(concat!("../styles/", $id, "/CLAUDE.md")),
+            include_bytes!(concat!("../styles/", $id, "/preview.jpg")).as_slice(),
         )
     };
 }
 
 /// The built-in styles, in the order the New Project sheet shows them:
 /// stories and knowledge, then characters, then music.
-const BUILT_IN: [(&str, &str, &str); 14] = [
+const BUILT_IN: [(&str, &str, &str, &[u8]); 14] = [
     style!("paper-collage-history"),
     style!("vintage-engraving"),
     style!("isometric-world"),
@@ -118,6 +119,8 @@ impl Settings {
 /// A built-in style.
 pub struct Style {
     pub settings: Settings,
+    /// Its place in `BUILT_IN`, which its preview is found by.
+    built_in: usize,
     settings_text: &'static str,
     guide: &'static str,
 }
@@ -137,10 +140,12 @@ fn in_language<'a>(english: &'a str, thai: &'a str) -> &'a str {
 pub fn all() -> Vec<Style> {
     BUILT_IN
         .iter()
-        .filter_map(
-            |(id, settings_text, guide)| match toml::from_str(settings_text) {
+        .enumerate()
+        .filter_map(|(built_in, (id, settings_text, guide, _))| {
+            match toml::from_str(settings_text) {
                 Ok(settings) => Some(Style {
                     settings,
+                    built_in,
                     settings_text,
                     guide,
                 }),
@@ -148,9 +153,39 @@ pub fn all() -> Vec<Style> {
                     log::error!("style {id}: {error}");
                     None
                 }
-            },
-        )
+            }
+        })
         .collect()
+}
+
+thread_local! {
+    /// The previews, decoded the first time the sheet asks: the sheet is
+    /// published on every change to it, and a decode each time would be
+    /// fourteen JPEGs a keystroke.
+    static PREVIEWS: Vec<slint::Image> = BUILT_IN
+        .iter()
+        .map(|(_, _, _, bytes)| decode(bytes).unwrap_or_default())
+        .collect();
+}
+
+fn decode(bytes: &[u8]) -> Option<slint::Image> {
+    let picture = image::load_from_memory_with_format(bytes, image::ImageFormat::Jpeg)
+        .ok()?
+        .into_rgba8();
+    Some(slint::Image::from_rgba8(
+        slint::SharedPixelBuffer::clone_from_slice(
+            picture.as_raw(),
+            picture.width(),
+            picture.height(),
+        ),
+    ))
+}
+
+impl Style {
+    /// A picture of what the style makes, for its card.
+    pub fn preview(&self) -> slint::Image {
+        PREVIEWS.with(|previews| previews.get(self.built_in).cloned().unwrap_or_default())
+    }
 }
 
 /// Lays `style` into a new project's `folder`: its settings, its recipe
@@ -211,6 +246,9 @@ mod tests {
             );
             assert!(!style.settings.starters.is_empty(), "{name}");
             assert!(!style.guide.is_empty(), "{name}");
+        }
+        for (id, _, _, bytes) in BUILT_IN {
+            assert!(decode(bytes).is_some(), "{id}: preview.jpg does not decode");
         }
     }
 

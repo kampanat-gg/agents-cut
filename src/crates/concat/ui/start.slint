@@ -78,6 +78,14 @@ export struct ChipOption {
     ratio: float,
 }
 
+/// One style on the New Project sheet: its name and a picture of what it
+/// makes, which "None" has not.
+export struct StyleCard {
+    label: string,
+    preview: image,
+    has-preview: bool,
+}
+
 /// One card in the projects grid.
 ///
 /// The two lines under the name arrive formatted. A decimal frame rate to
@@ -117,9 +125,10 @@ export struct StartData {
     name: string,
     location: string,
     /// The style a new project starts as: 0 none, then the built-in ones,
-    /// whose names, in the interface's language, are `style-options`.
+    /// whose names, in the interface's language, and pictures are
+    /// `style-cards`.
     style: int,
-    style-options: [ChipOption],
+    style-cards: [StyleCard],
     /// What the chosen style makes, in a sentence.
     style-note: string,
     /// Index into `aspects`; the ratio behind it is Rust's.
@@ -163,45 +172,80 @@ export struct StartData {
 
 // ── the small parts ──────────────────────────────────────────────────────
 
-// The styles as a grid of cards, the picked one outlined: more of them than a
-// row of chips can hold, with names long enough to need two lines.
+// The styles as a grid of cards, each a picture of what it makes over its
+// name, the picked one outlined: more of them than a row of chips holds, and
+// a look is quicker seen than read.
 component StyleGrid inherits Rectangle {
-    in property <[ChipOption]> options;
+    in property <[StyleCard]> cards;
     in property <int> current;
     in property <bool> enabled: true;
-    in property <int> columns: 3;
+    in property <int> columns: 4;
 
     callback changed(index: int);
 
     property <length> gap: 8px;
     property <length> card-w: (root.width - (root.columns - 1) * root.gap) / root.columns;
-    property <length> card-h: 46px;
+    property <length> picture-h: 64px;
+    property <length> card-h: root.picture-h + 36px;
 
-    height: Math.ceil(root.options.length / root.columns) * (root.card-h + root.gap) - root.gap;
+    height: Math.ceil(root.cards.length / root.columns) * (root.card-h + root.gap) - root.gap;
 
-    for option[index] in root.options: Rectangle {
+    for card[index] in root.cards: Rectangle {
         x: Math.mod(index, root.columns) * (root.card-w + root.gap);
         y: Math.floor(index / root.columns) * (root.card-h + root.gap);
         width: root.card-w;
         height: root.card-h;
         border-radius: Theme.r;
-        border-width: index == root.current ? 2px : 1px;
-        border-color: index == root.current ? Theme.accent : Theme.line;
         background: index == root.current ? Theme.accent-soft
             : touch.has-hover && root.enabled ? Theme.launch-field-active
             : Theme.launch-field;
+        clip: true;
+
+        if card.has-preview: Image {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: root.picture-h;
+            source: card.preview;
+            image-fit: cover;
+        }
+
+        // None: the frame, empty.
+        if !card.has-preview: Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: root.picture-h;
+            background: Theme.launch-well;
+
+            Text {
+                text: "+";
+                color: Theme.fg-dim;
+                font-size: 22px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
 
         Text {
-            x: 10px;
-            width: parent.width - 20px;
-            height: parent.height;
-            text: option.label;
+            x: 8px;
+            y: root.picture-h;
+            width: parent.width - 16px;
+            height: 36px;
+            text: card.label;
             color: Theme.fg;
-            font-size: Theme.fs;
+            font-size: Theme.fs-sm;
             font-weight: index == root.current ? Theme.weight-title : Theme.weight-body;
             wrap: word-wrap;
             overflow: elide;
             vertical-alignment: center;
+        }
+
+        // The outline over the picture, so it is not hidden under it.
+        Rectangle {
+            border-radius: Theme.r;
+            border-width: index == root.current ? 2px : 1px;
+            border-color: index == root.current ? Theme.accent : Theme.line;
         }
 
         touch := TouchArea {
@@ -2211,6 +2255,8 @@ export component NewProjectDialog inherits Modal {
     property <bool> narrow: root.width < 680px;
     /// A project needs somewhere to go. Everything else has a default.
     property <bool> can-create: !root.data.busy && root.data.location != "";
+    /// The frame's rows are shown: Change was pressed.
+    property <bool> frame-open: false;
 
     open: root.data.composing;
     title: I18n.t("start.newProject");
@@ -2285,10 +2331,10 @@ export component NewProjectDialog inherits Modal {
                 spacing: 8px;
 
                 StyleGrid {
-                    options: root.data.style-options;
+                    cards: root.data.style-cards;
                     current: root.data.style;
                     enabled: !root.data.busy;
-                    columns: root.narrow ? 2 : 3;
+                    columns: root.narrow ? 3 : 4;
                     changed(index) => { root.style-changed(index); }
                 }
 
@@ -2352,179 +2398,212 @@ export component NewProjectDialog inherits Modal {
             }
         }
 
-        FormRow {
-            label: I18n.upper("start.shape");
+        // The frame in one line until asked for: a style sets it, and most
+        // people never change it; folded, the sheet fits a laptop screen
+        // with the style cards above.
+        if !root.frame-open: FormRow {
+            label: I18n.upper("start.frame");
             stacked: root.narrow;
 
             HorizontalLayout {
-                spacing: 16px;
+                spacing: 12px;
 
-                ChipRow {
+                Text {
                     horizontal-stretch: 1;
-                    options: root.aspects;
-                    current: root.data.aspect;
-                    // A typed frame is its own shape.
-                    enabled: !root.data.busy && root.data.size < root.sizes.length;
-                    block: root.narrow;
-                    // Seven shapes are past a phone's width; four to a
-                    // row there, as the sizes wrap three.
-                    per-row: root.narrow ? 4 : 0;
-                    changed(index) => { root.aspect-changed(index); }
+                    text: root.aspects[root.data.aspect].label + " · " + root.data.size-readout
+                        + " · " + root.data.rate-readout;
+                    color: Theme.fg;
+                    font-size: Theme.fs;
+                    vertical-alignment: center;
                 }
 
-                // The chosen frame at the row's end, drawn rather than
-                // described: the one thing on this sheet that shows what
-                // the numbers mean.
-                if !root.narrow: VerticalLayout {
+                VerticalLayout {
                     alignment: center;
                     horizontal-stretch: 0;
-                    FrameShape {
-                        room: 32px;
-                        ratio: root.data.frame-aspect;
+                    LinkButton {
+                        label: I18n.t("start.changeFrame");
+                        enabled: !root.data.busy;
+                        clicked => { root.frame-open = true; }
                     }
                 }
             }
         }
 
-        FormRow {
-            label: I18n.upper("common.size");
-            stacked: root.narrow;
-
-            VerticalLayout {
-                spacing: 10px;
+        if root.frame-open: VerticalLayout {
+            FormRow {
+                label: I18n.upper("start.shape");
+                stacked: root.narrow;
 
                 HorizontalLayout {
                     spacing: 16px;
 
                     ChipRow {
                         horizontal-stretch: 1;
-                        options: root.sizes;
-                        extra: I18n.t("common.custom");
-                        current: root.data.size;
-                        enabled: !root.data.busy;
+                        options: root.aspects;
+                        current: root.data.aspect;
+                        // A typed frame is its own shape.
+                        enabled: !root.data.busy && root.data.size < root.sizes.length;
                         block: root.narrow;
-                        // Five chips and the readout do not fit one line of
-                        // a phone held upright: 4K and Custom ran off the
-                        // edge out of reach (#356). Three to a row there,
-                        // as the frame rates wrap four.
-                        per-row: root.narrow ? 3 : 0;
-                        changed(index) => { root.size-changed(index); }
+                        // Seven shapes are past a phone's width; four to a
+                        // row there, as the sizes wrap three.
+                        per-row: root.narrow ? 4 : 0;
+                        changed(index) => { root.aspect-changed(index); }
                     }
 
-                    VerticalLayout {
+                    // The chosen frame at the row's end, drawn rather than
+                    // described: the one thing on this sheet that shows what
+                    // the numbers mean.
+                    if !root.narrow: VerticalLayout {
                         alignment: center;
                         horizontal-stretch: 0;
-                        Text {
-                            text: root.data.size-readout;
-                            color: Theme.fg-dim;
-                            font-family: Theme.font-technical;
-                            font-size: Theme.fs-sm;
+                        FrameShape {
+                            room: 32px;
+                            ratio: root.data.frame-aspect;
                         }
                     }
                 }
-
-                // The typed frame: width by height, each side even and
-                // within 16 to 8192, which Rust rounds a typed number to.
-                if root.data.size == root.sizes.length: HorizontalLayout {
-                    spacing: 8px;
-                    alignment: start;
-
-                    NumberField {
-                        width: 96px;
-                        value: root.data.custom-width;
-                        minimum: 16;
-                        maximum: 8192;
-                        step: 2;
-                        unit: "W";
-                        enabled: !root.data.busy;
-                        changed(value) => { root.custom-width-edited(value); }
-                    }
-
-                    Text {
-                        text: "×";
-                        color: Theme.fg-dim;
-                        vertical-alignment: center;
-                    }
-
-                    NumberField {
-                        width: 96px;
-                        value: root.data.custom-height;
-                        minimum: 16;
-                        maximum: 8192;
-                        step: 2;
-                        unit: "H";
-                        enabled: !root.data.busy;
-                        changed(value) => { root.custom-height-edited(value); }
-                    }
-                }
             }
-        }
 
-        FormRow {
-            label: I18n.upper("common.frameRate");
-            stacked: root.narrow;
+            FormRow {
+                label: I18n.upper("common.size");
+                stacked: root.narrow;
 
-            VerticalLayout {
-                spacing: 10px;
+                VerticalLayout {
+                    spacing: 10px;
 
-                HorizontalLayout {
-                    spacing: 16px;
+                    HorizontalLayout {
+                        spacing: 16px;
 
-                    // Eleven rates and Custom in a list, not a wall of
-                    // twelve buttons: most edits want one of three, and
-                    // the rest are there when the list is opened.
-                    Select {
-                        width: 168px;
-                        options: root.data.rate-options;
-                        current: root.data.rate;
-                        enabled: !root.data.busy;
-                        changed(index) => { root.rate-changed(index); }
+                        ChipRow {
+                            horizontal-stretch: 1;
+                            options: root.sizes;
+                            extra: I18n.t("common.custom");
+                            current: root.data.size;
+                            enabled: !root.data.busy;
+                            block: root.narrow;
+                            // Five chips and the readout do not fit one line of
+                            // a phone held upright: 4K and Custom ran off the
+                            // edge out of reach (#356). Three to a row there,
+                            // as the frame rates wrap four.
+                            per-row: root.narrow ? 3 : 0;
+                            changed(index) => { root.size-changed(index); }
+                        }
+
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 0;
+                            Text {
+                                text: root.data.size-readout;
+                                color: Theme.fg-dim;
+                                font-family: Theme.font-technical;
+                                font-size: Theme.fs-sm;
+                            }
+                        }
                     }
 
-                    Rectangle { horizontal-stretch: 1; }
+                    // The typed frame: width by height, each side even and
+                    // within 16 to 8192, which Rust rounds a typed number to.
+                    if root.data.size == root.sizes.length: HorizontalLayout {
+                        spacing: 8px;
+                        alignment: start;
 
-                    VerticalLayout {
-                        alignment: center;
-                        horizontal-stretch: 0;
+                        NumberField {
+                            width: 96px;
+                            value: root.data.custom-width;
+                            minimum: 16;
+                            maximum: 8192;
+                            step: 2;
+                            unit: "W";
+                            enabled: !root.data.busy;
+                            changed(value) => { root.custom-width-edited(value); }
+                        }
+
                         Text {
-                            text: root.data.rate-readout;
+                            text: "×";
                             color: Theme.fg-dim;
-                            font-family: Theme.font-technical;
-                            font-size: Theme.fs-sm;
+                            vertical-alignment: center;
+                        }
+
+                        NumberField {
+                            width: 96px;
+                            value: root.data.custom-height;
+                            minimum: 16;
+                            maximum: 8192;
+                            step: 2;
+                            unit: "H";
+                            enabled: !root.data.busy;
+                            changed(value) => { root.custom-height-edited(value); }
                         }
                     }
                 }
+            }
 
-                // The typed rate, from 1 to 240. The readout above says the
-                // fraction it is kept as: 23.976 is 24000/1001.
-                if root.data.rate == root.rates.length: HorizontalLayout {
-                    alignment: start;
+            FormRow {
+                label: I18n.upper("common.frameRate");
+                stacked: root.narrow;
 
-                    NumberField {
-                        width: 112px;
-                        value: root.data.custom-fps;
-                        minimum: 1;
-                        maximum: 240;
-                        step: 1;
-                        precision: 3;
-                        unit: "fps";
-                        enabled: !root.data.busy;
-                        changed(value) => { root.custom-fps-edited(value); }
+                VerticalLayout {
+                    spacing: 10px;
+
+                    HorizontalLayout {
+                        spacing: 16px;
+
+                        // Eleven rates and Custom in a list, not a wall of
+                        // twelve buttons: most edits want one of three, and
+                        // the rest are there when the list is opened.
+                        Select {
+                            width: 168px;
+                            options: root.data.rate-options;
+                            current: root.data.rate;
+                            enabled: !root.data.busy;
+                            changed(index) => { root.rate-changed(index); }
+                        }
+
+                        Rectangle { horizontal-stretch: 1; }
+
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 0;
+                            Text {
+                                text: root.data.rate-readout;
+                                color: Theme.fg-dim;
+                                font-family: Theme.font-technical;
+                                font-size: Theme.fs-sm;
+                            }
+                        }
+                    }
+
+                    // The typed rate, from 1 to 240. The readout above says the
+                    // fraction it is kept as: 23.976 is 24000/1001.
+                    if root.data.rate == root.rates.length: HorizontalLayout {
+                        alignment: start;
+
+                        NumberField {
+                            width: 112px;
+                            value: root.data.custom-fps;
+                            minimum: 1;
+                            maximum: 240;
+                            step: 1;
+                            precision: 3;
+                            unit: "fps";
+                            enabled: !root.data.busy;
+                            changed(value) => { root.custom-fps-edited(value); }
+                        }
                     }
                 }
             }
-        }
 
-        // What shows where no picture covers the frame; see CanvasPicker.
-        FormRow {
-            label: I18n.upper("start.background");
-            last: true;
-            stacked: root.narrow;
+            // What shows where no picture covers the frame; see CanvasPicker.
+            FormRow {
+                label: I18n.upper("start.background");
+                last: true;
+                stacked: root.narrow;
 
-            CanvasPicker {
-                value: root.data.canvas;
-                enabled: !root.data.busy;
-                changed(value) => { root.canvas-changed(value); }
+                CanvasPicker {
+                    value: root.data.canvas;
+                    enabled: !root.data.busy;
+                    changed(value) => { root.canvas-changed(value); }
+                }
             }
         }
 
