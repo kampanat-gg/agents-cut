@@ -30,6 +30,7 @@ mod ui {
     slint::include_modules!();
 }
 
+mod agent;
 mod batch_volume;
 mod chips;
 mod dock;
@@ -660,6 +661,24 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     }
 
     let editor = app.global::<Editor>();
+
+    // ── the agent's sidebar ──
+    {
+        let agent = app.global::<ui::Agent>();
+        agent.set_rows(ModelRc::from(shell.studio.borrow().agent.rows()));
+        agent.on_send(on_window!(|state, text: SharedString| {
+            agent::send(&mut state, text.to_string());
+        }));
+        agent.on_cancel(on_window!(|state| {
+            state.agent.cancel();
+        }));
+        agent.on_new_chat(on_window!(|state| {
+            state.agent.new_chat();
+        }));
+        agent.on_shown_changed(on_window!(|state, shown: bool| {
+            state.agent.set_shown(shown);
+        }));
+    }
 
     // ── the launch screen ──
     app.on_start_compose(on_window!(|state| {

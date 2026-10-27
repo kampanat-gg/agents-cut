@@ -834,6 +834,8 @@ const ENHANCE_MARGIN: f64 = 1.0;
 pub struct Studio {
     pub host: Host,
     pub prefs: Preferences,
+    /// The agent's conversation in the sidebar; see `agent.rs`.
+    pub agent: crate::agent::Chat,
     /// What each effect library is showing, indexed the way `SHELF_KINDS`
     /// is: 0 filters, 1 effects, 2 audio.
     pub library: [LibraryView; 4],
@@ -2367,6 +2369,7 @@ impl Studio {
         let text_presets = presets::all(&host.dirs);
         let mut studio = Self {
             prefs,
+            agent: Default::default(),
             library: Default::default(),
             session: None,
             echo: None,
@@ -9374,6 +9377,7 @@ impl Studio {
     // ── publishing ──
 
     pub fn publish(&self, app: &App, models: &Models) {
+        self.agent.publish(app);
         // The tray's three menu labels and the tooltips' bare-letter
         // hints, spelled from the keymap so a rebind moves the words
         // with the key. An action left unbound shows an em dash rather

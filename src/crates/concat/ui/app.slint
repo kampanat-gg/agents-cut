@@ -80,6 +80,7 @@ import { TooltipLayer } from "primitives/tooltip.slint";
 import { FontSearch } from "inspector/font-picker.slint";
 import { Meters } from "timeline/vu-meter.slint";
 import { Workspace } from "workspace/workspace.slint";
+import { Agent, AgentRail, AgentRow, AgentSidebar } from "agent.slint";
 import {
     Backdrop,
     BackdropData,
@@ -110,6 +111,8 @@ import {
 import { SpeedRamp } from "inspector/speed-ramp.slint";
 
 export {
+    Agent,
+    AgentRow,
     Curves,
     Fmt,
     Focus,
@@ -725,8 +728,35 @@ export component App inherits Window {
             // nothing is passed to it: it is a box with four seats in it, and
             // the views inside those seats reach the state directly. See
             // editor.slint.
-            if !root.on-start: Workspace {
+            //
+            // The agent's sidebar sits at its left, outside the dock: it is
+            // the one panel that is about the whole edit, not a view of it.
+            if !root.on-start: Rectangle {
                 vertical-stretch: 1;
+                // Placed by hand: in a row layout the sidebar's maximum
+                // height would cap the workspace's. The workspace keeps its
+                // own 8px margin, which is the gap beside the sidebar.
+                property <length> side: Agent.shown ? 320px : 38px;
+
+                if Agent.shown: AgentSidebar {
+                    x: 8px;
+                    y: 8px;
+                    width: 320px;
+                    height: parent.height - 16px;
+                }
+                if !Agent.shown: AgentRail {
+                    x: 8px;
+                    y: 8px;
+                    width: 38px;
+                    height: parent.height - 16px;
+                }
+
+                Workspace {
+                    x: 8px + parent.side;
+                    y: 0;
+                    width: parent.width - self.x;
+                    height: parent.height;
+                }
             }
         }
     }

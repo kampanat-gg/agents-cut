@@ -1,0 +1,312 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jareer Abdullah and Concat contributors
+
+import { Theme } from "theme/theme.slint";
+import { I18n } from "i18n.slint";
+import { Glyph } from "icons.slint";
+import { IconButton } from "primitives/panel.slint";
+
+/// One row of the conversation. `role` is "user", "assistant", "tool",
+/// "error" or "note"; a tool row's `detail` is what it was given, and its
+/// `state` 0 while it runs, 1 once it worked, 2 if it failed.
+export struct AgentRow {
+    role: string,
+    text: string,
+    detail: string,
+    state: int,
+}
+
+// The agent beside the editor: what it and the user have said, and the
+// tools it called on the project. The conversation and the process behind
+// it are Rust's (see agent.rs); this draws the rows and reports a send.
+export global Agent {
+    in-out property <[AgentRow]> rows;
+    /// A turn is running: the send button is a stop button.
+    in-out property <bool> busy;
+    /// The sidebar is open; closed, it is a strip with a button.
+    in-out property <bool> shown: true;
+
+    callback send(text: string);
+    callback cancel();
+    callback new-chat();
+    callback shown-changed(shown: bool);
+}
+
+component Bubble inherits Rectangle {
+    in property <AgentRow> data;
+
+    property <bool> mine: data.role == "user";
+    property <bool> tool: data.role == "tool";
+    property <bool> problem: data.role == "error";
+    property <bool> note: data.role == "note";
+
+    height: layout.preferred-height;
+
+    layout := HorizontalLayout {
+        alignment: root.mine ? end : stretch;
+
+        Rectangle {
+            max-width: root.mine ? root.width * 0.85 : root.width;
+            background: root.mine ? Theme.accent-soft
+                : root.tool ? Theme.well
+                : root.problem ? Theme.danger-wash
+                : transparent;
+            border-radius: Theme.r;
+            border-width: root.problem ? 1px : 0px;
+            border-color: Theme.danger-edge;
+
+            VerticalLayout {
+                padding-left: root.mine || root.tool || root.problem ? 10px : 2px;
+                padding-right: root.mine || root.tool || root.problem ? 10px : 2px;
+                padding-top: root.tool ? 6px : 8px;
+                padding-bottom: root.tool ? 6px : 8px;
+                spacing: 2px;
+
+                HorizontalLayout {
+                    spacing: 6px;
+
+                    if root.tool: Rectangle {
+                        width: 7px;
+                        height: 7px;
+                        y: (parent.height - self.height) / 2;
+                        border-radius: 4px;
+                        background: root.data.state == 0 ? Theme.fg-dim
+                            : root.data.state == 1 ? Theme.green
+                            : Theme.danger;
+                    }
+
+                    Text {
+                        text: root.data.text;
+                        wrap: word-wrap;
+                        color: root.note ? Theme.fg-dim
+                            : root.problem ? Theme.danger
+                            : root.tool ? Theme.fg-muted
+                            : Theme.fg;
+                        font-size: root.tool || root.note ? Theme.fs-sm : Theme.fs-lg;
+                        font-weight: root.tool ? Theme.weight-title : Theme.weight-body;
+                        horizontal-alignment: root.note ? center : left;
+                    }
+                }
+
+                if root.tool && root.data.detail != "": Text {
+                    text: root.data.detail;
+                    wrap: word-wrap;
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-xs;
+                }
+            }
+        }
+    }
+}
+
+// The open sidebar: a header, the conversation, and the box a request is
+// typed into. Return sends; Shift-Return is a new line.
+export component AgentSidebar inherits Rectangle {
+    background: Theme.panel;
+    border-radius: Theme.r-lg;
+    clip: true;
+
+    /// Keeps the newest row in view while the user has not scrolled away.
+    property <bool> follow: true;
+    property <length> content-h: list.preferred-height;
+
+    changed content-h => {
+        if (root.follow) {
+            flick.content-y = Math.min(0px, flick.height - root.content-h - 16px);
+        }
+    }
+
+    function submit() {
+        if (Agent.busy || draft.text == "") {
+            return;
+        }
+        root.follow = true;
+        Agent.send(draft.text);
+        draft.text = "";
+    }
+
+    // Placed by hand rather than in a column: a layout's maximum height
+    // would cap the row the sidebar shares with the workspace.
+
+    // ── the header ──
+    Rectangle {
+        y: 0;
+        width: root.width;
+        height: 44px;
+
+        Rectangle {
+            y: parent.height - 1px;
+            height: 1px;
+            background: Theme.line;
+        }
+
+        HorizontalLayout {
+            padding-left: Theme.pad;
+            padding-right: 6px;
+            spacing: 2px;
+
+            Text {
+                text: I18n.t("agent.title");
+                color: Theme.fg;
+                font-size: Theme.fs-lg;
+                font-weight: Theme.weight-title;
+                vertical-alignment: center;
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            IconButton {
+                glyph: Glyph.plus;
+                label: I18n.t("agent.newChat");
+                enabled: Agent.rows.length > 0;
+                clicked => { Agent.new-chat(); }
+            }
+
+            IconButton {
+                glyph: Glyph.chevron-left;
+                label: I18n.t("agent.hide");
+                clicked => { Agent.shown-changed(false); }
+            }
+        }
+    }
+
+    // ── the conversation ──
+    Rectangle {
+        y: 44px;
+        width: root.width;
+        height: root.height - 44px - box.height;
+
+        if Agent.rows.length == 0: VerticalLayout {
+            width: parent.width;
+            height: parent.height;
+            alignment: center;
+            padding: 24px;
+            spacing: 8px;
+
+            Text {
+                text: I18n.t("agent.emptyTitle");
+                color: Theme.fg;
+                font-size: Theme.fs-xl;
+                font-weight: Theme.weight-title;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+
+            Text {
+                text: I18n.t("agent.emptyBody");
+                color: Theme.fg-muted;
+                font-size: Theme.fs;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+
+        flick := Flickable {
+            content-height: root.content-h + 16px;
+            content-width: self.width;
+
+            flicked => {
+                root.follow = self.content-y <= self.height - root.content-h - 16px + 24px;
+            }
+
+            list := VerticalLayout {
+                x: 12px;
+                y: 8px;
+                width: flick.width - 24px;
+                height: self.preferred-height;
+                spacing: 8px;
+
+                for row in Agent.rows: Bubble {
+                    data: row;
+                }
+            }
+        }
+    }
+
+    // ── the request box ──
+    box := Rectangle {
+        y: root.height - self.height;
+        width: root.width;
+        height: Math.min(160px, Math.max(44px, draft.preferred-height + 18px)) + 20px;
+
+        Rectangle {
+            x: 10px;
+            y: 10px;
+            width: parent.width - 20px;
+            height: parent.height - 20px;
+            background: Theme.field;
+            border-radius: Theme.r;
+            border-width: 1px;
+            border-color: draft.has-focus ? Theme.accent : Theme.line;
+            clip: true;
+
+            draft := TextInput {
+                x: 10px;
+                y: 9px;
+                width: parent.width - 50px;
+                height: parent.height - 18px;
+                color: Theme.fg;
+                font-size: Theme.fs-lg;
+                single-line: false;
+                wrap: word-wrap;
+                selection-background-color: Theme.accent;
+                selection-foreground-color: Theme.on-accent;
+
+                key-pressed(event) => {
+                    if (event.text == Key.Return && !event.modifiers.shift) {
+                        root.submit();
+                        return accept;
+                    }
+                    return reject;
+                }
+            }
+
+            if draft.text == "" && !draft.has-focus: Text {
+                x: 10px;
+                y: 9px;
+                text: I18n.t("agent.placeholder");
+                color: Theme.fg-dim;
+                font-size: Theme.fs-lg;
+            }
+
+            IconButton {
+                x: parent.width - self.width - 6px;
+                y: parent.height - 32px;
+                height: 26px;
+                glyph: Agent.busy ? Glyph.stop : Glyph.arrow-up-right;
+                label: Agent.busy ? I18n.t("agent.stop") : I18n.t("agent.send");
+                accent: !Agent.busy && draft.text != "";
+                enabled: Agent.busy || draft.text != "";
+                clicked => {
+                    if (Agent.busy) {
+                        Agent.cancel();
+                    } else {
+                        root.submit();
+                    }
+                }
+            }
+        }
+    }
+}
+
+// The closed sidebar: a strip at the edge with the button that opens it.
+export component AgentRail inherits Rectangle {
+    background: Theme.panel;
+    border-radius: Theme.r-lg;
+
+    VerticalLayout {
+        padding-top: 9px;
+        alignment: start;
+
+        HorizontalLayout {
+            alignment: center;
+
+            IconButton {
+                glyph: Glyph.sparkle;
+                label: I18n.t("agent.show");
+                checked: Agent.busy;
+                clicked => { Agent.shown-changed(true); }
+            }
+        }
+    }
+}

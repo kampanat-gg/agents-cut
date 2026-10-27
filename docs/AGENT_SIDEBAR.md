@@ -49,28 +49,36 @@ Frames and exports read a copy of the edit (`Session::detached`), so a
 render never holds up the window. A call waits at most 30 seconds for the
 window (a modal dialog holds the event loop) and then fails with a reason.
 
-## Running the agent: Claude Code CLI
+## Running the agent: Claude Code CLI (done)
 
-The app spawns the user's installed `claude` and talks to it over stdio:
+The sidebar (`ui/agent.slint`, `src/agent.rs`) runs the user's installed
+`claude`, one process per turn, with the request on stdin:
 
 ```sh
-claude -p \
-  --input-format stream-json --output-format stream-json --verbose \
-  --mcp-config <app-generated>.json \
-  --append-system-prompt-file <style preset>.md \
-  --allowedTools "mcp__concat__*" \
-  --permission-prompt-tool mcp__concat__approve
+claude -p --output-format stream-json --verbose \
+  --strict-mcp-config --mcp-config <config>/agent-mcp.json \
+  --tools "" --allowedTools mcp__concat \
+  --append-system-prompt "<where the project is, how to work>" \
+  [--resume <session id>]
 ```
 
 - **No API key in the app**: it uses the user's own Claude login.
-- **Streaming**: each JSON line (text, tool call, tool result) becomes a chat
-  bubble or a tool card in the sidebar.
-- **Approvals**: `--permission-prompt-tool` sends "may I run X?" to a tool the
-  app serves, which shows Allow / Deny in the sidebar.
-- **History**: keep the `session_id`, then `--resume` it when the project
-  reopens.
-- **Fallback**: if `claude` is not installed, the sidebar says so and links to
-  the install page.
+- **Only the editor's tools**: `--tools ""` takes away the shell and file
+  tools, and `--strict-mcp-config` the user's other MCP servers, so the
+  agent can do nothing but edit (and nothing needs an approval yet).
+- **The server**: `agent-mcp.json` (mode 600, it holds the token) points
+  `concat --mcp window` at the Automation page's server when it is on, or at
+  one the sidebar starts on a free loopback port for itself.
+- **Streaming**: each JSON line becomes a reply bubble or a tool row, which
+  turns green or red when the tool's result comes back.
+- **History**: the `session_id` of the first turn is resumed by the next;
+  New chat forgets it. Stop kills the turn's process.
+- **Fallback**: if `claude` is not found (the PATH, `~/.local/bin`,
+  `~/.claude/local`, Homebrew; or `CONCAT_CLAUDE`), the sidebar says to
+  install it.
+
+Still to do here: Allow / Deny for tools beyond the editor's, through
+`--permission-prompt-tool`, once those tools are added (step 4).
 
 ## Other tools, via the generated `--mcp-config`
 
@@ -101,8 +109,9 @@ next run. Examples: TikTok fast-cut, Podcast clip, Tutorial, Cinematic.
 
 1. ~~Live mode: the agent edits the open project through the window's undo
    stack.~~ Done.
-2. Sidebar pane: chat list, input box, tool cards, approvals.
-3. Agent process: spawn, stream, resume, cancel.
+2. ~~Sidebar pane: chat list, input box, tool cards.~~ Done; approvals come
+   with step 4.
+3. ~~Agent process: spawn, stream, resume, cancel.~~ Done.
 4. MCP settings page: Codex, image/video generation, voice.
 5. Style presets.
 
