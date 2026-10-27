@@ -34,7 +34,8 @@ use crate::studio::Studio;
 use crate::ui::{Agent, AgentRow, App};
 
 /// The tools the agent may call: the editor's, and of the machine's only
-/// `codex exec`, for pictures - no other command, no files.
+/// `codex exec`, for pictures, and reading inside the project's folder,
+/// which Claude Code allows there without asking and refuses elsewhere.
 const ALLOWED: &str = "mcp__concat";
 /// The one shell command allowed, by Claude Code's permission rule; any
 /// other, or one chained after it, is refused without asking.
@@ -43,25 +44,14 @@ const CODEX_RULE: &str = "Bash(codex exec:*)";
 /// How much of a tool's input or a failure is shown under its row.
 const DETAIL_CHARS: usize = 160;
 
-/// What the agent is told about where it is, before the user's words.
-const BRIEF: &str = "You are the editing agent inside Concat, a video editor. \
-The project open on screen is at {path}. Work on it with the concat tools: call \
-project_open with that path first, then edit it. Every edit lands in the editor's \
-undo history while the user watches, so make edits one meaningful step at a time. \
-Use timeline_read to see what is there and preview_frame to look at the result \
-when it helps. The editor saves every edit on its own: never call project_save \
-or project_close, and do not tell the user to save. Keep replies short and plain, \
-and reply in the language the user writes in (Thai or English).";
+/// What the agent is told about where it is and how to work, before the
+/// user's words: `{path}` is the project's folder.
+const BRIEF: &str = include_str!("../agent/brief.md");
 
-/// Added to [`BRIEF`] when Codex is installed: how to make a picture.
-const CODEX_BRIEF: &str = " To make a picture - a background, a cover, an \
-illustration, a frame for a title - run Codex in Bash, exactly in this form and \
-as the whole command: codex exec --skip-git-repo-check --sandbox workspace-write \
---ephemeral{model} -C '{path}' \"Generate an image: <what to draw>, <aspect ratio \
-of the project's frame>. Save it as generated/<short-name>.png in the current \
-directory. Reply with only the saved file's path.\" It takes about a minute. \
-Then import the file with media_import and place it with clip_add. Bash runs \
-nothing but codex exec.";
+/// Added to [`BRIEF`] when Codex is installed: how to make pictures, in
+/// layers, cut out, and with a character kept the same. `{model}` is a
+/// `-m` for Codex, or nothing.
+const CODEX_BRIEF: &str = include_str!("../agent/codex.md");
 
 /// One thing the process said, as the sidebar cares about it.
 #[derive(Clone, Debug, PartialEq)]
@@ -287,17 +277,18 @@ fn start(studio: &mut Studio, text: &str) -> Result<(), String> {
             .filter(|model| !model.trim().is_empty())
             .map(|model| format!(" -m {}", model.trim()))
             .unwrap_or_default();
+        brief.push('\n');
         brief.push_str(
             &CODEX_BRIEF
                 .replace("{path}", &project)
                 .replace("{model}", &model),
         );
         command
-            .args(["--tools", "Bash"])
+            .args(["--tools", "Bash,Read,Glob"])
             .args(["--allowedTools", ALLOWED, CODEX_RULE]);
     } else {
         command
-            .args(["--tools", ""])
+            .args(["--tools", "Read,Glob"])
             .args(["--allowedTools", ALLOWED]);
     }
     command.arg("--append-system-prompt").arg(brief);

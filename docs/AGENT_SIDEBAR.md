@@ -57,7 +57,7 @@ The sidebar (`ui/agent.slint`, `src/agent.rs`) runs the user's installed
 ```sh
 claude -p --output-format stream-json --verbose \
   --strict-mcp-config --mcp-config <config>/agent-mcp.json \
-  --tools Bash --allowedTools mcp__concat "Bash(codex exec:*)" \
+  --tools Bash,Read,Glob --allowedTools mcp__concat "Bash(codex exec:*)" \
   --append-system-prompt "<where the project is, how to work>" \
   [--resume <session id>]
 ```
@@ -69,6 +69,12 @@ claude -p --output-format stream-json --verbose \
   rule, `Bash(codex exec:*)`, so `codex exec` is the only command it can run;
   anything else, or chained after it, is refused without asking. Without
   Codex, `--tools ""` takes the shell away altogether.
+- **Reading**: Read and Glob, which Claude Code allows inside the project
+  folder without asking and refuses outside it, so the agent can look at its
+  pictures and at `characters/` notes.
+- **The brief** is `agent/brief.md`, plus `agent/codex.md` when Codex is
+  there: layers, transparent cut-outs, and identity lock from
+  `characters/<name>/` references passed with `codex exec -i ... --`.
 - **Pictures**: the brief tells the agent to run `codex exec --sandbox
   workspace-write -C <project> "Generate an image: ... Save it as
   generated/<name>.png"` (about a minute an image), then `media_import` and
