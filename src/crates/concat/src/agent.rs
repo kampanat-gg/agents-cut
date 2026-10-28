@@ -32,7 +32,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
-use slint::{ComponentHandle, Model, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 use crate::host::Shell;
 use crate::i18n::{t, tf};
@@ -748,6 +748,15 @@ impl Chat {
             brand: Default::default(),
             open: false,
             elapsed: Default::default(),
+            // A "choices" row keeps its choices a line each, which is how
+            // it is saved too.
+            choices: if role == "choices" {
+                ModelRc::new(VecModel::from(
+                    text.lines().map(SharedString::from).collect::<Vec<_>>(),
+                ))
+            } else {
+                Default::default()
+            },
         });
         self.rows.row_count() - 1
     }
@@ -848,6 +857,7 @@ impl Chat {
             brand: brand.into(),
             open: group.open,
             elapsed: duration(span).into(),
+            choices: Default::default(),
         };
         let at = group.row;
         if at < self.rows.row_count() {
@@ -920,10 +930,15 @@ impl Chat {
         match said {
             Said::Session(id) => self.session = Some(id),
             Said::Text(text) => {
-                let text = text.trim();
-                if !text.is_empty() {
+                let (words, choices) = split_choices(text.trim());
+                if !words.is_empty() || !choices.is_empty() {
                     self.close_group(false);
-                    self.push("assistant", text, "", 0);
+                }
+                if !words.is_empty() {
+                    self.push("assistant", &words, "", 0);
+                }
+                if !choices.is_empty() {
+                    self.push("choices", &choices.join("\n"), "", 0);
                 }
             }
             Said::Tool { id, name, input } => {
@@ -933,7 +948,7 @@ impl Chat {
                 group.steps.push(Step {
                     label,
                     detail,
-                    brand: brand_of(&name),
+                    brand: brand_of(&name, &input),
                     state: 0,
                     began: Instant::now(),
                     took: None,
@@ -990,9 +1005,73 @@ pub fn send(studio: &mut Studio, text: String) {
         return;
     }
     studio.agent.push("user", &text, "", 0);
-    if let Err(problem) = start(studio, &text) {
+    if let Err(problem) = start(studio, &expand(&text)) {
         studio.agent.push("error", &problem, "", 0);
     }
+}
+
+/// The sidebar's commands: what is typed, or what a button sends, and the
+/// request the agent gets for it. The conversation shows the command.
+const COMMANDS: &[(&str, &str)] = &[
+    (
+        "/storyboard",
+        "Write this episode's storyboard.md from its brief.md, beat by beat, and set its \
+         status to storyboard. Do not build it yet. If the brief does not say yet what the \
+         episode is about, write nothing: ask me, offering subjects that fit the channel and \
+         are not in plan.md as choices. Once the subject is settled, ask anything else you \
+         need the same way, one question at a time, then write it.",
+    ),
+    (
+        "/build",
+        "Build this episode from its storyboard.md, beat by beat, then set its status to done.",
+    ),
+];
+
+/// What the agent is asked for `text`: a command's request, with what
+/// was typed after the command, or the words as they are.
+fn expand(text: &str) -> String {
+    for (command, request) in COMMANDS {
+        if let Some(rest) = text.strip_prefix(command)
+            && (rest.is_empty() || rest.starts_with(char::is_whitespace))
+        {
+            let rest = rest.trim();
+            return if rest.is_empty() {
+                (*request).to_owned()
+            } else {
+                format!("{request}\n\n{rest}")
+            };
+        }
+    }
+    text.to_owned()
+}
+
+/// A reply's choices: the lines of a ```` ```choices ```` block, which the
+/// brief asks the agent to end a question with, taken out of the words
+/// and drawn as buttons under them.
+fn split_choices(text: &str) -> (String, Vec<String>) {
+    let Some((before, rest)) = text.split_once("```choices") else {
+        return (text.to_owned(), Vec::new());
+    };
+    let (block, after) = rest.split_once("```").unwrap_or((rest, ""));
+    let choices = block
+        .lines()
+        .map(|line| {
+            let line = line.trim();
+            let line = line
+                .strip_prefix("- ")
+                .or_else(|| line.strip_prefix("* "))
+                .unwrap_or(line);
+            match line.split_once(". ") {
+                Some((number, rest)) if number.chars().all(|c| c.is_ascii_digit()) => rest,
+                _ => line,
+            }
+            .trim()
+            .to_owned()
+        })
+        .filter(|line| !line.is_empty())
+        .collect();
+    let words = format!("{}\n{}", before.trim_end(), after.trim_start());
+    (words.trim().to_owned(), choices)
 }
 
 fn start(studio: &mut Studio, text: &str) -> Result<(), String> {
@@ -1328,20 +1407,29 @@ fn quoted(command: &str) -> Option<&str> {
 /// A tool call in words, for its step: what it does, and under it what
 /// it does that to. The editor's tools by what they are for, a Codex call
 /// by the picture it was asked for, a read by the file's name.
-/// Who a tool call is the work of, by its name: Codex for the shell
-/// (the one command the agent may run is `codex exec`), ElevenLabs for
-/// its connector's tools, Claude for its own reading, writing and
-/// searching, and no one for the editor's own tools.
-pub fn brand_of(name: &str) -> &'static str {
+/// Who a tool call is the work of, by its name: Codex for `codex exec`
+/// in the shell, ElevenLabs for its connector's tools, Claude for its own
+/// reading, writing, searching and any other command, and no one for the
+/// editor's own tools.
+pub fn brand_of(name: &str, input: &Value) -> &'static str {
     if name.to_lowercase().contains("elevenlabs") {
         "elevenlabs"
-    } else if name == "Bash" {
+    } else if name == "Bash" && is_codex(input) {
         "codex"
     } else if name.starts_with("mcp__") {
         ""
     } else {
         "claude"
     }
+}
+
+/// A shell call that is Codex at work, not another command.
+fn is_codex(input: &Value) -> bool {
+    input["command"]
+        .as_str()
+        .unwrap_or_default()
+        .trim_start()
+        .starts_with("codex")
 }
 
 pub fn describe(name: &str, input: &Value) -> (String, String) {
@@ -1357,7 +1445,9 @@ pub fn describe(name: &str, input: &Value) -> (String, String) {
         "Bash" => {
             let command = text("command");
             let asked = quoted(command).unwrap_or(command);
-            if asked.contains("ffmpeg") || asked.to_lowercase().contains("join") {
+            if !is_codex(input) {
+                (t("agent.step.run"), clip(command))
+            } else if asked.contains("ffmpeg") || asked.to_lowercase().contains("join") {
                 (t("agent.step.join"), String::new())
             } else {
                 // The picture itself: what follows "Generate an image:",
@@ -1656,13 +1746,42 @@ mod tests {
 
     #[test]
     fn each_step_names_who_does_it() {
-        assert_eq!(brand_of("Bash"), "codex");
-        assert_eq!(brand_of("Read"), "claude");
-        assert_eq!(brand_of("WebSearch"), "claude");
-        assert_eq!(brand_of("mcp__concat__clip_add"), "");
+        let none = Value::Null;
+        let codex = serde_json::json!({"command": "codex exec 'Generate an image: a ship'"});
+        let listing = serde_json::json!({"command": "cat ../../plan.md; ls ../"});
+        assert_eq!(brand_of("Bash", &codex), "codex");
+        assert_eq!(brand_of("Bash", &listing), "claude");
+        assert_eq!(describe("Bash", &listing).0, t("agent.step.run"));
+        assert_eq!(brand_of("Read", &none), "claude");
+        assert_eq!(brand_of("WebSearch", &none), "claude");
+        assert_eq!(brand_of("mcp__concat__clip_add", &none), "");
         assert_eq!(
-            brand_of("mcp__claude_ai_ElevenLabs_2__creative_generate_speech"),
+            brand_of(
+                "mcp__claude_ai_ElevenLabs_2__creative_generate_speech",
+                &none
+            ),
             "elevenlabs"
+        );
+    }
+
+    #[test]
+    fn a_command_asks_for_its_request_and_what_follows_it() {
+        assert!(expand("/storyboard").starts_with("Write this episode's storyboard.md"));
+        assert!(expand("/storyboard about eels").ends_with("\n\nabout eels"));
+        assert_eq!(expand("/storyboards"), "/storyboards");
+        assert_eq!(expand("Make it shorter"), "Make it shorter");
+    }
+
+    #[test]
+    fn a_reply_ends_in_its_choices() {
+        let (words, choices) = split_choices(
+            "Which one?\n\n```choices\n- Mary Celeste (1872)\n2. The Bloop\n\n```\nOr your own.",
+        );
+        assert_eq!(words, "Which one?\nOr your own.");
+        assert_eq!(choices, ["Mary Celeste (1872)", "The Bloop"]);
+        assert_eq!(
+            split_choices("No question."),
+            ("No question.".to_owned(), Vec::new())
         );
     }
 

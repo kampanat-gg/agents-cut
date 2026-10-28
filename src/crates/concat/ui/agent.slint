@@ -55,6 +55,8 @@ export struct AgentRow {
     elapsed: string,
     /// The brand of the step under way, for the header while it runs.
     brand: string,
+    /// A "choices" row's answers to the question before it.
+    choices: [string],
 }
 
 
@@ -772,17 +774,79 @@ component Bubble inherits Rectangle {
     property <bool> note: data.role == "note";
 
     property <bool> steps: data.role == "steps";
+    property <bool> choices: data.role == "choices";
+    /// The question is the last thing said and nothing runs: its answers
+    /// can be picked.
+    property <bool> open-question: root.position == Agent.rows.length - 1 && !Agent.busy;
+
+    /// "Type my own answer": the box, for words of the user's own.
+    callback own-answer();
 
     height: stack.preferred-height;
 
     stack := VerticalLayout {
+        // The answers the agent offered, each a button that sends it, and
+        // the box for one of the user's own; spent once answered.
+        if root.choices: VerticalLayout {
+            spacing: 6px;
+            padding-top: 2px;
+            padding-bottom: 4px;
+
+            for choice in root.data.choices: Rectangle {
+                height: label.preferred-height + 16px;
+                background: pick.has-hover && root.open-question ? Theme.sidebar-hover : transparent;
+                border-radius: Theme.r;
+                border-width: 1px;
+                border-color: Theme.line;
+                opacity: root.open-question ? 1 : 0.5;
+
+                label := Text {
+                    x: 12px;
+                    width: parent.width - 24px;
+                    text: choice;
+                    color: Theme.fg;
+                    font-size: Theme.fs;
+                    wrap: word-wrap;
+                    vertical-alignment: center;
+                }
+
+                pick := TouchArea {
+                    enabled: root.open-question;
+                    mouse-cursor: root.open-question ? pointer : default;
+                    clicked => { Agent.send(choice); }
+                }
+            }
+
+            if root.open-question: Rectangle {
+                height: 34px;
+                background: own.has-hover ? Theme.sidebar-hover : transparent;
+                border-radius: Theme.r;
+                border-width: 1px;
+                border-color: Theme.line;
+
+                Text {
+                    x: 12px;
+                    width: parent.width - 24px;
+                    text: I18n.t("agent.typeOwn") + "…";
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs;
+                    vertical-alignment: center;
+                }
+
+                own := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.own-answer(); }
+                }
+            }
+        }
+
         if root.steps: Steps {
             width: root.width;
             data: root.data;
             position: root.position;
         }
 
-        if !root.steps: HorizontalLayout {
+        if !root.steps && !root.choices: HorizontalLayout {
             alignment: root.mine ? end : stretch;
 
             Rectangle {
@@ -1029,6 +1093,9 @@ export component AgentSidebar inherits Rectangle {
                 for row[index] in Agent.rows: Bubble {
                     data: row;
                     position: index;
+                    own-answer => {
+                        draft.focus();
+                    }
                 }
             }
         }

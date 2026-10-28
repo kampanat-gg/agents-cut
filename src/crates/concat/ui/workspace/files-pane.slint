@@ -759,7 +759,7 @@ export component StoryboardView inherits Rectangle {
                             mouse-cursor: pointer;
                             clicked => {
                                 if (Files.beats.length == 0) {
-                                    Agent.send(I18n.t("files.storyboardPrompt"));
+                                    Agent.send("/storyboard");
                                 } else {
                                     Agent.mention(I18n.t("files.revisePrefix"));
                                 }
@@ -797,7 +797,7 @@ export component StoryboardView inherits Rectangle {
                             enabled: !Agent.busy;
                             mouse-cursor: pointer;
                             clicked => {
-                                Agent.send(I18n.t("files.buildPrompt"));
+                                Agent.send("/build");
                                 Files.storyboard = -1;
                                 Files.storyboard-closed();
                             }
