@@ -4,7 +4,7 @@ To make a picture, run Codex in Bash, exactly in this form and as the whole
 command:
 
 ```
-codex exec --skip-git-repo-check --sandbox workspace-write --ephemeral{model} -C '{path}' [-i <reference> ...] -- "Generate an image: <what to draw>, <aspect ratio>. Save it as generated/<short-name>.png in the current directory. Reply with only the saved file's path."
+codex exec --skip-git-repo-check --sandbox workspace-write --ephemeral{model} -C '{path}' [-i <reference> ...] -- "Generate an image: <what to draw>, <aspect ratio>. Save it as episodes/<episode>/images/<short-name>.png in the current directory. Reply with only the saved file's path."
 ```
 
 - The `--` before the prompt is required: `-i` takes every word after it as a
@@ -76,7 +76,7 @@ frame.
 1. Keep everything that does not move on separate layers: the background is
    one still. Only the moving part is drawn per frame, with a TRANSPARENT
    background.
-2. Draw a base frame first: `generated/seq/<name>/base.png`. It is a
+2. Draw a base frame first: `episodes/<episode>/motion/<name>/base.png`. It is a
    reference, not a frame: frame `0001.png` is drawn as an edit of it like
    every other key, or the first frame jumps against the rest.
 3. Draw 3 to 5 key poses, each an edit of the base (pass the base with
@@ -93,7 +93,7 @@ frame.
    folder: `ffmpeg -y -framerate 12 -i %04d.png -c:v libvpx-vp9 -pix_fmt
    yuva420p -b:v 0 -crf 30 -auto-alt-ref 0 ../<name>.webm`. 12 pictures a
    second is stop-motion pace; use 8 for a slower, more handmade feel.
-7. Import `generated/seq/<name>.webm` and place it over the background.
+7. Import `episodes/<episode>/motion/<name>.webm` and place it over the background.
    Codex draws 2:3, so set both to fill the frame (`frameClip` with fill) or
    they show bars in 9:16. To hold it longer, place it again right after
    itself (it loops cleanly when the last frame leads back into the first).

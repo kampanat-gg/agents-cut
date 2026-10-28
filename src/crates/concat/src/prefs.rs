@@ -29,12 +29,12 @@ pub struct Preferences {
     /// The parent folder of the last project created successfully.
     pub last_project_location: Option<String>,
     /// The accent, by the lower-cased name the theme lists it under —
-    /// "lime", "sky", ... — or as "#rrggbb" for a colour picked by hand.
+    /// "blue", "clay", ... — or as "#rrggbb" for a colour picked by hand.
     /// `None`, or a name no longer on the list, is the first one, which is
-    /// Lime.
+    /// Blue.
     pub accent: Option<String>,
     /// The playhead's colour as "#rrggbb", when one was picked by hand in
-    /// Settings > Appearance. `None` is the palette's own, which is lime.
+    /// Settings > Appearance. `None` is the palette's own, which is blue.
     pub playhead: Option<String>,
     /// The interface scale, as a percent from [`UI_SCALES`]: the window and
     /// everything in it are drawn this much larger than the display's own

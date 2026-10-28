@@ -31,7 +31,7 @@ viewer knows the channel at a glance. Follow this file for every episode.
 
 - Background: one aged paper texture, warm beige with soft stains and
   fibres, no objects, full frame 9:16. Make it once as
-  `generated/paper-bg.png` and reuse it under every episode.
+  `brand/paper-bg.png` and reuse it under every episode.
 - Pictures: archival-style black-and-white photographs, printed with a white
   border, slightly rotated (2 to 6 degrees), like prints pinned to paper.
 - People and objects: cut-outs with a transparent background and a thin white

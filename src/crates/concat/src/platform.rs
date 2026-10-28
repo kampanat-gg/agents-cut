@@ -280,6 +280,14 @@ impl CustomApplicationHandler for DropHandler {
             self.fitted = true;
             fit_to_screen(window);
         }
+        // AppKit lays the lights out again whenever it lays out the title
+        // bar - showing the window, resizing it, leaving full screen - and
+        // back where they were; they go down again at the next event. A
+        // look and nothing more while they are where they belong.
+        #[cfg(target_os = "macos")]
+        if let Some(window) = winit_window {
+            place_traffic_lights(window);
+        }
         if !self.wayland_tried
             && let Some(window) = winit_window
         {
@@ -421,6 +429,69 @@ fn listen_for_wayland_drops(
 
 /// Whether the window draws the macOS traffic lights over its own strip.
 pub const MACOS: bool = cfg!(target_os = "macos");
+
+/// The strip's height on macOS, in points: title-bar.slint's, which the
+/// traffic lights are centred in.
+#[cfg(target_os = "macos")]
+const TITLE_BAR: f64 = 44.0;
+
+/// Moves the traffic lights to the middle of the strip's height and in
+/// from its corner, the way an app with a tall title bar has them. AppKit
+/// sits them a fixed distance up from the foot of a container as tall as
+/// its own title bar; the container is made as tall as that, the lights
+/// and the room wanted over them, and pinned to the window's top.
+#[cfg(target_os = "macos")]
+fn place_traffic_lights(window: &WinitWindow) {
+    use objc2_app_kit::{NSView, NSWindowButton};
+    use slint::winit_030::winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let Ok(handle) = window.window_handle() else {
+        return;
+    };
+    let RawWindowHandle::AppKit(handle) = handle.as_raw() else {
+        return;
+    };
+    // SAFETY: winit's content view, alive as long as the window it came
+    // from, and this runs on the main thread, in the window's own event.
+    let view: &NSView = unsafe { handle.ns_view.cast().as_ref() };
+    let Some(ns_window) = view.window() else {
+        return;
+    };
+    let buttons = [
+        NSWindowButton::NSWindowCloseButton,
+        NSWindowButton::NSWindowMiniaturizeButton,
+        NSWindowButton::NSWindowZoomButton,
+    ]
+    .map(|kind| ns_window.standardWindowButton(kind));
+    let Some(close) = &buttons[0] else {
+        return;
+    };
+    // SAFETY: AppKit's own views, read and moved on the main thread.
+    unsafe {
+        let Some(container) = close.superview().and_then(|bar| bar.superview()) else {
+            return;
+        };
+        // The lights keep their distance from the container's foot, so
+        // the container is that, the light, and the room over it.
+        let light = close.frame();
+        let over = ((TITLE_BAR - light.size.height) / 2.0).round();
+        let height = light.origin.y + light.size.height + over;
+        let mut bar = container.frame();
+        let top = ns_window.frame().size.height - height;
+        if bar.size.height != height || bar.origin.y != top {
+            bar.size.height = height;
+            bar.origin.y = top;
+            container.setFrame(bar);
+        }
+        for (index, button) in buttons.iter().flatten().enumerate() {
+            let mut origin = button.frame().origin;
+            let x = 16.0 + index as f64 * 20.0;
+            if origin.x != x {
+                origin.x = x;
+                button.setFrameOrigin(origin);
+            }
+        }
+    }
+}
 
 /// Chooses and installs the backend, and hands back the device the
 /// renderer and the engine's compositor share, when there is one.

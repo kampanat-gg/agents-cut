@@ -3,7 +3,7 @@
 
 import { Theme } from "../theme/theme.slint";
 import { Pane } from "pane.slint";
-import { PaneKind, PaneSwitcher } from "pane-switcher.slint";
+import { PaneKind } from "pane-switcher.slint";
 import { I18n } from "../i18n.slint";
 import { Glyph } from "../icons.slint";
 import { ContextMenu, MenuItemData, MenuMetrics, MenuRow } from "../primitives/context-menu.slint";
@@ -12,7 +12,6 @@ import { ThinHScrollbar, ThinScrollbar } from "../primitives/scrollbar.slint";
 import {
     ClipData, DropData, TimelineTabData, TimelineTool, TrackData, TrackSize,
 } from "../timeline/model.slint";
-import { TimelineTabs } from "../timeline/tabs.slint";
 import { TimelineTray } from "../timeline/tray.slint";
 import { TrackHeaders } from "../timeline/track-header.slint";
 import { Lanes } from "../timeline/lanes.slint";
@@ -291,37 +290,9 @@ export component TimelinePane inherits Rectangle {
     }
 
     Pane {
-        // The one edge kept when the outlines came off. The timeline sits
-        // under the three panes above it rather than beside anything, so its
-        // top is the only pane edge in the window that a gutter does not
-        // already draw against a darker ground — and the tab strip runs right
-        // up to it, which without a rule reads as tabs hanging off nothing.
-        //
-        // Inside the Pane and above the tabs, so the layout gives it a row of
-        // its own and nothing has to be nudged down by a pixel to make room.
-        Rectangle {
-            height: 1px;
-            background: Theme.line;
-        }
-
-        TimelineTabs {
-            tabs: root.tabs;
-            current: root.current-tab;
-
-            selected(index) => { root.tab-selected(index); }
-            renamed(index, name) => { root.tab-renamed(index, name); }
-            close-requested(index) => { root.tab-close-requested(index); }
-            added => { root.tab-added(); }
-            moved(from, to) => { root.tab-moved(from, to); }
-
-            PaneSwitcher {
-                kind: PaneKind.timeline;
-                seat: root.pane-seat;
-                removable: root.pane-removable;
-                picked(kind) => { root.pane-picked(kind); }
-                removed => { root.pane-removed(); }
-            }
-        }
+        // No tab strip: the project's videos, one a timeline, are the side
+        // panel's cards, which pick, add, rename and remove them. The tray
+        // is the pane's top.
 
         tray := TimelineTray {
             tool: root.tool;

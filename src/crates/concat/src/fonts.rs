@@ -27,6 +27,12 @@ use slint::fontique_011::fontique::{self, FallbackKey, FamilyId, Language, Scrip
 
 const THAI_FALLBACK: &[u8] = concat_text::NOTO_SANS_THAI;
 
+/// Inter's Medium, for the window alone: the weight Claude's app sets its
+/// titles and buttons in. The video's titles have no use for it, so it is
+/// not one of concat-text's base fonts. From the same Inter 4.1 release
+/// as those, under the same licence.
+const INTER_MEDIUM: &[u8] = include_bytes!("../../concat-text/fonts/Inter-Medium.ttf");
+
 /// A face the window falls back on, and the fallback lists it goes on: a
 /// script, and the locales fontique keeps a list of its own for under it
 /// ("" is the script's default list).
@@ -54,6 +60,48 @@ pub fn register() {
     register_base(&mut collection);
     let registered = register_fallbacks(&mut collection);
     log::debug!("fonts: {} fallback families registered", registered.len());
+    put_system_thai_first(&mut collection);
+}
+
+/// Where a Mac keeps the face its own interface sets Thai in - what Thai
+/// reads as beside San Francisco in every app of the system's, and in
+/// Claude's. Hidden behind a leading dot, so a font list does not offer
+/// it and the renderer does not find it by asking the system for Thai.
+#[cfg(target_os = "macos")]
+const SYSTEM_THAI: (&str, &str) = ("/System/Library/Fonts/ThonburiUI.ttc", ".ThonburiUI");
+
+/// Reads the system's interface face for Thai off the disk and puts it at
+/// the head of Thai's fallback lists, ahead of the machine's other Thai
+/// faces and the bundled Noto, so Thai in the window looks as it does in
+/// the system's own apps. Nothing is bundled for it: a Mac without the
+/// file keeps the order it had.
+fn put_system_thai_first(collection: &mut fontique::Collection) {
+    #[cfg(target_os = "macos")]
+    {
+        let (path, family) = SYSTEM_THAI;
+        let Ok(bytes) = std::fs::read(path) else {
+            return;
+        };
+        let registered = collection.register_fonts(fontique::Blob::new(Arc::new(bytes)), None);
+        let Some(thai) = registered
+            .iter()
+            .map(|(id, _)| *id)
+            .find(|id| collection.family_name(*id) == Some(family))
+        else {
+            return;
+        };
+        let script: Script = "Thai".parse().expect("a script");
+        for language in [None, Language::parse("th").ok()] {
+            let key = FallbackKey::new(script, language.as_ref());
+            let rest: Vec<FamilyId> = collection
+                .fallback_families(key)
+                .filter(|id| *id != thai)
+                .collect();
+            collection.set_fallbacks(key, std::iter::once(thai).chain(rest));
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = collection;
 }
 
 /// Registers the base fonts with `collection`, and puts Inter on the
@@ -63,7 +111,7 @@ fn register_base(
     collection: &mut fontique::Collection,
 ) -> Vec<(FamilyId, Vec<fontique::FontInfo>)> {
     let mut registered = Vec::new();
-    for face in concat_text::BASE_FONTS {
+    for face in concat_text::BASE_FONTS.into_iter().chain([INTER_MEDIUM]) {
         let blob = fontique::Blob::new(Arc::new(face));
         registered.extend(collection.register_fonts(blob, None));
     }

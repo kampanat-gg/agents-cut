@@ -57,6 +57,7 @@ import { AvatarData } from "primitives/avatar.slint";
 import { VoiceoverData, VoiceoverPanel } from "dialogs/voiceover.slint";
 import { DockDivider, DockSide, SeatBox } from "dock.slint";
 import { Editor } from "editor.slint";
+import { Build } from "build.slint";
 import { PaneKind, Panes } from "workspace/pane-switcher.slint";
 import {
     ChipOption,
@@ -82,7 +83,7 @@ import { FontSearch } from "inspector/font-picker.slint";
 import { Meters } from "timeline/vu-meter.slint";
 import { Workspace } from "workspace/workspace.slint";
 import { Agent, AgentRail, AgentRow, AgentSidebar, AgentStarter, AgentStep } from "agent.slint";
-import { FileRow, Files } from "workspace/files-pane.slint";
+import { FileRow, Files, SidePanel, VideoCard } from "workspace/files-pane.slint";
 import {
     Backdrop,
     BackdropData,
@@ -114,8 +115,10 @@ import { SpeedRamp } from "inspector/speed-ramp.slint";
 
 export {
     Agent,
+    Build,
     FileRow,
     Files,
+    VideoCard,
     AgentRow,
     AgentStarter,
     AgentStep,
@@ -687,15 +690,17 @@ export component App inherits Window {
                 deep: root.on-start;
                 project-name: root.project-name;
                 status: root.project-status;
+                side: root.on-start ? 0px : Agent.shown ? 320px : 44px;
+                panel: root.on-start || !Files.panel-shown ? 0px : 300px;
 
                 menu: root.open-menu;
                 keyboard-menu: root.keyboard-menu;
                 keyboard-token: root.keyboard-menu-token;
                 menu-opened(index, at-x, keyboard) => {
-                    // Under the strip, which is 32px tall - both measured
-                    // from the window's corner, past the system's bars.
+                    // Under the strip - both measured from the window's
+                    // corner, past the system's bars.
                     appmenu.request-x = at-x + root.safe-area-insets.left;
-                    appmenu.request-y = 32px + root.safe-area-insets.top;
+                    appmenu.request-y = self.height + root.safe-area-insets.top;
                     root.menu-by-keyboard = keyboard;
                     root.menu-opened(index);
                 }
@@ -742,27 +747,47 @@ export component App inherits Window {
             if !root.on-start: Rectangle {
                 vertical-stretch: 1;
                 // Placed by hand: in a row layout the sidebar's maximum
-                // height would cap the workspace's. The workspace keeps its
-                // own 8px margin, which is the gap beside the sidebar.
-                property <length> side: Agent.shown ? 320px : 38px;
+                // height would cap the workspace's. Flush to the window's
+                // edges, a hairline from the work beside it.
+                property <length> side: Agent.shown ? 320px : 44px;
 
                 if Agent.shown: AgentSidebar {
-                    x: 8px;
-                    y: 8px;
+                    x: 0;
+                    y: 0;
                     width: 320px;
-                    height: parent.height - 16px;
+                    height: parent.height;
                 }
                 if !Agent.shown: AgentRail {
-                    x: 8px;
-                    y: 8px;
-                    width: 38px;
-                    height: parent.height - 16px;
+                    x: 0;
+                    y: 0;
+                    width: 44px;
+                    height: parent.height;
+                }
+                Rectangle {
+                    x: parent.side;
+                    width: 1px;
+                    background: Theme.gutter;
+                }
+
+                // The side panel down the right, as the sidebar is down the
+                // left: the project's videos and files.
+                property <length> panel: Files.panel-shown ? 300px : 0px;
+                if Files.panel-shown: Rectangle {
+                    x: parent.width - parent.panel - 1px;
+                    width: 1px;
+                    background: Theme.gutter;
+                }
+                if Files.panel-shown: SidePanel {
+                    x: parent.width - parent.panel;
+                    y: 0;
+                    width: parent.panel;
+                    height: parent.height;
                 }
 
                 Workspace {
-                    x: 8px + parent.side;
+                    x: parent.side + 1px;
                     y: 0;
-                    width: parent.width - self.x;
+                    width: parent.width - self.x - (Files.panel-shown ? parent.panel + 1px : 0px);
                     height: parent.height;
                 }
             }

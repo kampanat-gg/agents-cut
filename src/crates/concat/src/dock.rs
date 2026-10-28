@@ -12,8 +12,10 @@ pub const SEAT_MIN_H: f32 = 140.0;
 /// find its corner button with, which is the only way back from a layout that
 /// has been squeezed too far.
 pub const SEAT_MIN_GRAB: f32 = 64.0;
-/// The gutter between the halves of a split, and the margin round the lot.
-pub const SEAT_GAP: f32 = 8.0;
+/// The gutter between the halves of a split: a hairline of the window's
+/// ground between panes that meet edge to edge. The lot runs to the
+/// window's edges, with no margin round it.
+pub const SEAT_GAP: f32 = 1.0;
 
 pub enum Dock {
     /// One view, filling its box.
@@ -254,25 +256,19 @@ pub fn lay_out(node: &Dock, (x, y, w, h): (f32, f32, f32, f32), out: &mut DockLa
     }
 }
 
-/// The arrangement the editor opens with: the monitor over the timeline,
-/// and the project's files a column down the whole right side. The agent
-/// beside them does the work the library and the inspector are for, so
-/// neither takes room until someone asks for it - both are a switch away
-/// on any seat, see `PaneSwitcher`. About a fifth of the width to the
-/// files; the timeline takes the lower 0.4 of the height.
+/// The arrangement the editor opens with: the monitor over the timeline.
+/// The agent is a column down the left and the project's videos and files
+/// one down the right, both outside the dock; the library, the inspector
+/// and the rest are a switch away on either seat, see `PaneSwitcher`. The
+/// timeline takes the lower 0.4 of the height.
 pub fn default_dock() -> Dock {
     Dock::Split {
-        columns: true,
-        ratio: 0.8,
-        first: Box::new(Dock::Split {
-            columns: false,
-            ratio: 0.6,
-            first: Dock::leaf(PaneKind::Preview),
-            // The timeline, whose VU meters are a column at its own right
-            // edge (see vu-meter.slint) rather than a seat of their own.
-            second: Dock::leaf(PaneKind::Timeline),
-        }),
-        second: Dock::leaf(PaneKind::Files),
+        columns: false,
+        ratio: 0.6,
+        first: Dock::leaf(PaneKind::Preview),
+        // The timeline, whose VU meters are a column at its own right
+        // edge (see vu-meter.slint) rather than a seat of their own.
+        second: Dock::leaf(PaneKind::Timeline),
     }
 }
 

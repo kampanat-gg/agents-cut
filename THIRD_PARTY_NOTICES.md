@@ -256,3 +256,13 @@ https://unsplash.com/photos/2v921tlqdXE), used under the Unsplash License. The s
 and is embedded in the app; each card is the effect's own shader run over
 it on the GPU when the app first needs the card (`concat-host`'s
 `cards.rs`).
+
+## Service marks (LobeHub Icons)
+
+The marks beside the agent's steps - Claude, Codex, ElevenLabs - and the
+Claude mark in its sidebar are SVGs from LobeHub Icons
+(https://github.com/lobehub/lobe-icons), `@lobehub/icons-static-svg`
+1.95.1, MIT License, Copyright (c) 2023 LobeHub. They live in
+`src/crates/concat/ui/logos/` with the licence beside them. The marks
+themselves are their owners' trademarks, shown only to name the service
+doing the work.

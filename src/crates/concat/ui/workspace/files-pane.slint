@@ -13,7 +13,8 @@
 import { I18n } from "../i18n.slint";
 import { Theme } from "../theme/theme.slint";
 import { Glyph, Icon } from "../icons.slint";
-import { Payload } from "../util.slint";
+import { Fmt, Payload } from "../util.slint";
+import { Editor } from "../editor.slint";
 import { IconButton } from "../primitives/panel.slint";
 import { Tip } from "../primitives/tooltip.slint";
 import { Pane, PaneHeader, PaneScroll } from "pane.slint";
@@ -40,8 +41,30 @@ export struct FileRow {
     thumbed: bool,
 }
 
+/// One of the project's videos: a timeline, as a card.
+export struct VideoCard {
+    name: string,
+    /// How long it runs, in seconds.
+    seconds: float,
+    /// Its frame and rate, "1080 × 1920 · 24 fps".
+    frame: string,
+    /// Its frame's width over its height: the shape its picture is drawn
+    /// in on the card.
+    aspect: float,
+    /// The earliest picture on it, small; `thumbed` says there is one.
+    thumb: image,
+    thumbed: bool,
+    /// It is the timeline open in the editor.
+    current: bool,
+}
+
 export global Files {
     in-out property <[FileRow]> rows;
+    /// The project's videos, one a timeline, for the side panel.
+    in-out property <[VideoCard]> videos;
+    /// The side panel is open, and which tab: 0 the videos, 1 the files.
+    in-out property <bool> panel-shown: true;
+    in-out property <int> panel-tab: 0;
     /// A folder's arrow, or a double-click on it.
     callback toggle(path: string);
     /// A file double-clicked.
@@ -200,18 +223,97 @@ component Line inherits Rectangle {
     }
 }
 
-export component FilesPane inherits Pane {
-    in property <int> pane-seat;
-    in property <bool> pane-removable;
-    callback pane-picked(kind: PaneKind);
-    callback pane-removed();
-
-    /// The line picked last, by path; the pane's own, not the project's.
+/// The project's folder as lines, with a file's menu: the Files pane's
+/// body, and the side panel's Files tab.
+export component FileList inherits Rectangle {
+    /// The line picked last, by path; the list's own, not the project's.
     property <string> selected;
     /// The file a menu was opened on, and where.
     property <FileRow> menu-row;
     property <length> menu-x;
     property <length> menu-y;
+
+    if Files.rows.length == 0: VerticalLayout {
+        padding: 24px;
+        alignment: center;
+        spacing: 6px;
+        Text {
+            text: I18n.t("files.empty");
+            color: Theme.fg;
+            font-size: Theme.fs;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: I18n.t("files.emptyNote");
+            color: Theme.fg-dim;
+            font-size: Theme.fs-sm;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+
+    PaneScroll {
+        VerticalLayout {
+            padding-top: 6px;
+            padding-bottom: 6px;
+            for row in Files.rows: Line {
+                line: row;
+                selected: row.path == root.selected;
+                picked => { root.selected = row.path; }
+                menu(x, y) => {
+                    root.menu-row = row;
+                    root.menu-x = self.absolute-position.x - root.absolute-position.x + x;
+                    root.menu-y = self.absolute-position.y - root.absolute-position.y + y;
+                    menu.show();
+                }
+            }
+        }
+    }
+
+    menu := PopupWindow {
+        x: Math.min(root.menu-x, root.width - 196px);
+        y: root.menu-y;
+        width: 188px;
+        close-policy: close-on-click-outside;
+
+        Rectangle {
+            background: Theme.field;
+            border-width: 1px;
+            border-color: Theme.line-strong;
+            border-radius: Theme.r;
+
+            VerticalLayout {
+                padding: 4px;
+                if root.menu-row.placeable: MenuRow {
+                    text: I18n.t("files.add");
+                    glyph: Glyph.plus;
+                    chosen => { menu.close(); Files.action(root.menu-row.path, "add"); }
+                }
+                MenuRow {
+                    text: I18n.t("files.mention");
+                    glyph: Glyph.sparkle;
+                    chosen => { menu.close(); Files.action(root.menu-row.path, "mention"); }
+                }
+                MenuRow {
+                    text: I18n.t("files.open");
+                    glyph: Glyph.arrow-up-right;
+                    chosen => { menu.close(); Files.action(root.menu-row.path, "open"); }
+                }
+                MenuRow {
+                    text: I18n.t("files.reveal");
+                    glyph: Glyph.folder;
+                    chosen => { menu.close(); Files.action(root.menu-row.path, "reveal"); }
+                }
+            }
+        }
+    }
+}
+
+export component FilesPane inherits Pane {
+    in property <int> pane-seat;
+    in property <bool> pane-removable;
+    callback pane-picked(kind: PaneKind);
+    callback pane-removed();
 
     PaneHeader {
         title: I18n.t("files.title");
@@ -233,82 +335,236 @@ export component FilesPane inherits Pane {
         }
     }
 
-    body := Rectangle {
+    FileList {
         vertical-stretch: 1;
+    }
+}
 
-        if Files.rows.length == 0: VerticalLayout {
-            padding: 24px;
-            alignment: center;
-            spacing: 6px;
-            Text {
-                text: I18n.t("files.empty");
-                color: Theme.fg;
-                font-size: Theme.fs;
-                horizontal-alignment: center;
-            }
-            Text {
-                text: I18n.t("files.emptyNote");
-                color: Theme.fg-dim;
-                font-size: Theme.fs-sm;
-                horizontal-alignment: center;
-                wrap: word-wrap;
+// ── the side panel ───────────────────────────────────────────────────────
+//
+// A column down the window's right, outside the dock, as the agent's is
+// down its left: the project's videos, one a timeline, and its files.
+// Its tabs and buttons are in the title bar, over it.
+
+component Card inherits Rectangle {
+    in property <VideoCard> video;
+    /// Its place in the project's list of timelines.
+    in property <int> index;
+    callback picked();
+    callback menu(x: length, y: length);
+
+    /// The name is being typed over.
+    property <bool> naming;
+
+    height: 112px;
+    border-radius: Theme.r-lg;
+    // Flat with a hairline edge, as Claude's cards are; the open one a
+    // step up from the ground.
+    background: root.video.current || touch.has-hover ? Theme.raised : transparent;
+    border-width: 1px;
+    border-color: root.video.current ? Theme.line-strong : Theme.line;
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.picked(); }
+        // A double-click on a card names it again, as it did on a tab.
+        double-clicked => {
+            root.naming = true;
+            field.text = root.video.name;
+            field.focus();
+            field.select-all();
+        }
+        pointer-event(event) => {
+            if (event.button == PointerEventButton.right
+                && event.kind == PointerEventKind.down) {
+                root.menu(self.mouse-x, self.mouse-y);
             }
         }
+    }
 
-        PaneScroll {
-            VerticalLayout {
-                padding-top: 6px;
-                padding-bottom: 6px;
-                for row in Files.rows: Line {
-                    line: row;
-                    selected: row.path == root.selected;
-                    picked => { root.selected = row.path; }
-                    menu(x, y) => {
-                        root.menu-row = row;
-                        root.menu-x = self.absolute-position.x - body.absolute-position.x + x;
-                        root.menu-y = self.absolute-position.y - body.absolute-position.y + y;
-                        menu.show();
+    // The picture in its own frame's shape - upright for a short, wide
+    // for a 16:9 - fitted into the same square on every card, so the
+    // names line up and nothing of the picture is cut away.
+    property <length> slot: 96px;
+    property <float> shape: Math.max(0.1, root.video.aspect);
+    Rectangle {
+        x: 8px;
+        y: 8px;
+        width: root.slot;
+        height: root.slot;
+        border-radius: 8px;
+        background: Theme.page;
+    }
+    Rectangle {
+        width: root.shape >= 1 ? root.slot : root.slot * root.shape;
+        height: root.shape >= 1 ? root.slot / root.shape : root.slot;
+        x: 8px + (root.slot - self.width) / 2;
+        y: 8px + (root.slot - self.height) / 2;
+        border-radius: 6px;
+        background: Theme.well;
+        clip: true;
+
+        if root.video.thumbed: Image {
+            source: root.video.thumb;
+            image-fit: cover;
+        }
+        if !root.video.thumbed: Icon {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            glyph: Glyph.film;
+            size: 16px;
+            tint: Theme.fg-dim;
+        }
+    }
+
+    VerticalLayout {
+        x: 8px + root.slot + 12px;
+        width: parent.width - self.x - 10px;
+        padding-top: 12px;
+        padding-bottom: 12px;
+        spacing: 4px;
+        alignment: start;
+
+        Rectangle {
+            height: 20px;
+
+            if !root.naming: Text {
+                width: parent.width;
+                height: parent.height;
+                text: root.video.name;
+                color: Theme.fg;
+                font-size: Theme.fs;
+                font-weight: Theme.weight-title;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            field := TextInput {
+                visible: root.naming;
+                width: parent.width;
+                height: parent.height;
+                color: Theme.fg;
+                font-size: Theme.fs;
+                font-weight: Theme.weight-title;
+                vertical-alignment: center;
+                single-line: true;
+                selection-background-color: Theme.accent;
+                selection-foreground-color: Theme.on-accent;
+                accepted => {
+                    if (self.text != "") {
+                        Editor.tab-renamed(root.index, self.text);
+                    }
+                    root.naming = false;
+                }
+                key-pressed(event) => {
+                    if (event.text == Key.Escape) {
+                        root.naming = false;
+                        return accept;
+                    }
+                    return reject;
+                }
+                changed has-focus => {
+                    if (!self.has-focus) {
+                        root.naming = false;
                     }
                 }
             }
         }
+        Text {
+            text: Fmt.short-duration(root.video.seconds) + "  ·  " + root.video.frame;
+            color: Theme.fg-dim;
+            font-size: Theme.fs-xs;
+        }
+    }
+}
 
-        menu := PopupWindow {
-            x: Math.min(root.menu-x, body.width - 196px);
-            y: root.menu-y;
-            width: 188px;
-            close-policy: close-on-click-outside;
+/// The project's videos as cards, and a button for one more.
+export component VideoList inherits Rectangle {
+    /// The card a menu was opened on, and where.
+    property <int> menu-index;
+    property <length> menu-x;
+    property <length> menu-y;
+
+    PaneScroll {
+        VerticalLayout {
+            padding: 8px;
+            spacing: 6px;
+
+            for video[index] in Files.videos: Card {
+                video: video;
+                index: index;
+                picked => { Editor.tab-selected(index); }
+                menu(x, y) => {
+                    root.menu-index = index;
+                    root.menu-x = self.absolute-position.x - root.absolute-position.x + x;
+                    root.menu-y = self.absolute-position.y - root.absolute-position.y + y;
+                    menu.show();
+                }
+            }
 
             Rectangle {
-                background: Theme.field;
-                border-width: 1px;
-                border-color: Theme.line-strong;
+                height: 36px;
                 border-radius: Theme.r;
+                border-width: 1px;
+                border-color: Theme.line;
+                background: add.has-hover ? Theme.raised : transparent;
 
-                VerticalLayout {
-                    padding: 4px;
-                    if root.menu-row.placeable: MenuRow {
-                        text: I18n.t("files.add");
-                        glyph: Glyph.plus;
-                        chosen => { menu.close(); Files.action(root.menu-row.path, "add"); }
+                HorizontalLayout {
+                    alignment: center;
+                    spacing: 6px;
+                    VerticalLayout {
+                        alignment: center;
+                        Icon { glyph: Glyph.plus; size: 13px; }
                     }
-                    MenuRow {
-                        text: I18n.t("files.mention");
-                        glyph: Glyph.sparkle;
-                        chosen => { menu.close(); Files.action(root.menu-row.path, "mention"); }
+                    Text {
+                        text: I18n.t("files.newVideo");
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs-sm;
+                        vertical-alignment: center;
                     }
-                    MenuRow {
-                        text: I18n.t("files.open");
-                        glyph: Glyph.arrow-up-right;
-                        chosen => { menu.close(); Files.action(root.menu-row.path, "open"); }
-                    }
-                    MenuRow {
-                        text: I18n.t("files.reveal");
-                        glyph: Glyph.folder;
-                        chosen => { menu.close(); Files.action(root.menu-row.path, "reveal"); }
+                }
+
+                add := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { Editor.tab-added(); }
+                }
+            }
+        }
+    }
+
+    menu := PopupWindow {
+        x: Math.min(root.menu-x, root.width - 176px);
+        y: root.menu-y;
+        width: 168px;
+        close-policy: close-on-click-outside;
+
+        Rectangle {
+            background: Theme.field;
+            border-width: 1px;
+            border-color: Theme.line-strong;
+            border-radius: Theme.r;
+
+            VerticalLayout {
+                padding: 4px;
+                // The last video stays: a project is never without one,
+                // and the window refuses it the way a tab's close did.
+                MenuRow {
+                    text: I18n.t("files.removeVideo");
+                    glyph: Glyph.trash;
+                    chosen => {
+                        menu.close();
+                        Editor.tab-close-requested(root.menu-index);
                     }
                 }
             }
         }
     }
+}
+
+/// The panel itself: the tab the title bar has picked.
+export component SidePanel inherits Rectangle {
+    background: Theme.panel;
+    clip: true;
+
+    if Files.panel-tab == 0: VideoList {}
+    if Files.panel-tab == 1: FileList {}
 }

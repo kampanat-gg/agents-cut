@@ -15,6 +15,7 @@ import { Button } from "../primitives/modal.slint";
 import { SegmentedControl } from "../primitives/segmented-control.slint";
 import { Select } from "../primitives/select.slint";
 import { SpeedGraph, SpeedRamp } from "speed-ramp.slint";
+import { Build } from "../build.slint";
 import {
     Check,
     ColourField,
@@ -1578,7 +1579,10 @@ export component VideoPanel inherits VerticalLayout {
     // for the person in the picture - custom with strokes painted on the
     // monitor over it - and chroma key drops a colour. A key is the chroma
     // package on the chain, which is why its knobs read from the chain's
-    // own rows. One at a time: ticking a block unticks the others.
+    // own rows. One at a time: ticking a block unticks the others. A
+    // build without the cutout model has the chroma key alone: custom
+    // starts from the model's mask too, so neither of the others could
+    // cut anything.
     if !root.figure: Section {
         cutout := SectionHeader {
             title: I18n.t("clipInspector.removeBackground");
@@ -1588,25 +1592,27 @@ export component VideoPanel inherits VerticalLayout {
             switchable: true;
             on: root.removal != 0;
             switched(on) => {
-                root.remove-by(!on ? 0 : root.selected.cutout-strokes > 0 ? 2 : 1);
+                root.remove-by(!on ? 0 : !Build.vision-ai ? 3
+                    : root.selected.cutout-strokes > 0 ? 2 : 1);
             }
             summary: root.removal == 0 ? I18n.t("common.off")
                 : root.removal == 1 ? I18n.t("clipInspector.autoRemoval")
                 : root.removal == 2 ? I18n.t("clipInspector.customRemoval") : I18n.t("clipInspector.chromaKey");
             HelpButton {
-                text: I18n.t("clipInspector.autoRemovalKeepsWhat");
+                text: Build.vision-ai ? I18n.t("clipInspector.autoRemovalKeepsWhat")
+                    : I18n.t("clipInspector.chromaKeyOnly");
             }
         }
 
         if cutout.open: SectionBody {
 
-            RemovalBlock {
+            if Build.vision-ai: RemovalBlock {
                 title: I18n.t("clipInspector.autoRemoval");
                 on: root.removal == 1;
                 toggled(on) => { root.remove-by(on ? 1 : 0); }
             }
 
-            if root.removal == 1: Row {
+            if Build.vision-ai && root.removal == 1: Row {
                 label: I18n.t("clipInspector.subject");
                 Select {
                     options: [I18n.t("common.auto"), I18n.t("clipInspector.person"), I18n.t("clipInspector.object")];
@@ -1614,7 +1620,7 @@ export component VideoPanel inherits VerticalLayout {
                     changed(index) => { root.cutout-subject(index); }
                 }
             }
-            if root.removal == 1: Param {
+            if Build.vision-ai && root.removal == 1: Param {
                 label: I18n.t("clipInspector.feather");
                 value <=> root.feather;
                 minimum: 0;
@@ -1626,17 +1632,17 @@ export component VideoPanel inherits VerticalLayout {
                 unit-scale: 100;
                 changed(v) => { root.set(ClipField.cutout-feather, v); root.commit(); }
             }
-            if root.removal == 1 && root.selected.cutout-progress >= 0: AnalysisRow {
+            if Build.vision-ai && root.removal == 1 && root.selected.cutout-progress >= 0: AnalysisRow {
                 progress: root.selected.cutout-progress;
                 fetching: root.selected.cutout-fetching;
             }
-            if root.removal == 1 && root.selected.cutout-progress < 0 && root.selected.cutout-empty: Note {
+            if Build.vision-ai && root.removal == 1 && root.selected.cutout-progress < 0 && root.selected.cutout-empty: Note {
                 text: I18n.t("clipInspector.nothingFoundKeepPicture");
             }
 
-            Hairline { }
+            if Build.vision-ai: Hairline { }
 
-            RemovalBlock {
+            if Build.vision-ai: RemovalBlock {
                 title: I18n.t("clipInspector.customRemoval");
                 on: root.removal == 2;
                 toggled(on) => { root.remove-by(on ? 2 : 0); }
@@ -1648,7 +1654,7 @@ export component VideoPanel inherits VerticalLayout {
         // The brushes, in the order everyone expects: the two that follow the mask,
         // then the two that do as they are told. Picking one starts the
         // painting; Apply ends it.
-        if root.removal == 2: HorizontalLayout {
+        if Build.vision-ai && root.removal == 2: HorizontalLayout {
                 padding-left: Theme.pad;
                 padding-right: Theme.pad;
                 spacing: 6px;
@@ -1692,7 +1698,7 @@ export component VideoPanel inherits VerticalLayout {
                     horizontal-stretch: 1;
                 }
             }
-            if root.removal == 2: Param {
+            if Build.vision-ai && root.removal == 2: Param {
                 label: I18n.t("common.size");
                 value: root.brush-size;
                 minimum: 0.005;
@@ -1704,7 +1710,7 @@ export component VideoPanel inherits VerticalLayout {
                 unit-scale: 100;
                 changed(v) => { root.cutout-size(v); }
             }
-            if root.removal == 2: Param {
+            if Build.vision-ai && root.removal == 2: Param {
                 label: I18n.t("clipInspector.feather");
                 value <=> root.feather;
                 minimum: 0;
@@ -1716,11 +1722,11 @@ export component VideoPanel inherits VerticalLayout {
                 unit-scale: 100;
                 changed(v) => { root.set(ClipField.cutout-feather, v); root.commit(); }
             }
-            if root.removal == 2 && root.selected.cutout-progress >= 0: AnalysisRow {
+            if Build.vision-ai && root.removal == 2 && root.selected.cutout-progress >= 0: AnalysisRow {
                 progress: root.selected.cutout-progress;
                 fetching: root.selected.cutout-fetching;
             }
-            if root.removal == 2: Row {
+            if Build.vision-ai && root.removal == 2: Row {
                 label: root.selected.cutout-strokes == 1 ? I18n.t("clipInspector.oneStroke")
                     : I18n.t1("clipInspector.strokes", "\{root.selected.cutout-strokes}");
                 Rectangle {
@@ -1735,7 +1741,7 @@ export component VideoPanel inherits VerticalLayout {
                 }
             }
 
-            Hairline { }
+            if Build.vision-ai: Hairline { }
 
             RemovalBlock {
                 title: I18n.t("clipInspector.chromaKey");

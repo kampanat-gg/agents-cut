@@ -55,24 +55,24 @@ export global Light {
     // panes are the lit thing, the ground is not, and the step between them is
     // the gutter. `raised` is the only pure white in the window and is spent
     // where something genuinely floats — a menu, a tooltip, a dialog sheet.
-    out property <color> panel: #f7f7f8;
+    out property <color> panel: #faf9f5;
     out property <color> raised: #ffffff;
-    out property <color> well: #dfdfe4;
-    out property <color> field: #f0f0f2;
-    out property <color> field-hover: #e8e8ec;
-    out property <color> field-active: #d6d6dd;
+    out property <color> well: #ebe9e0;
+    out property <color> field: #f0eee6;
+    out property <color> field-hover: #e8e6dc;
+    out property <color> field-active: #dedbd0;
 
     // the launch screen's own ladder — see the dark palette for why it
     // exists. Deeper here too, which on this side of the switch means a
     // greyer page and panes that stop short of white: the launcher is the
     // one screen with no picture on it, and it is allowed to be the quiet
     // room the rest of the app is not.
-    out property <color> launch-page: #c4c4cd;
-    out property <color> launch-panel: #ededf1;
-    out property <color> launch-well: #d6d6dd;
-    out property <color> launch-raised: #f7f7f8;
-    out property <color> launch-field: #e2e2e8;
-    out property <color> launch-field-active: #cdcdd6;
+    out property <color> launch-page: #e3e0d5;
+    out property <color> launch-panel: #f5f4ed;
+    out property <color> launch-well: #e8e6dc;
+    out property <color> launch-raised: #faf9f5;
+    out property <color> launch-field: #ebe9e0;
+    out property <color> launch-field-active: #dedbd0;
 
     // hairlines — black-alpha, the mirror of the dark palette's white-alpha,
     // so they hold on panel, well, and ground alike. A shade heavier than a
@@ -83,9 +83,9 @@ export global Light {
 
     // text — the three steps of the dark palette's ramp, matched on contrast
     // against `panel` rather than by inverting the channels.
-    out property <color> fg: #16161a;
-    out property <color> fg-muted: #56565e;
-    out property <color> fg-dim: #86868c;
+    out property <color> fg: #141413;
+    out property <color> fg-muted: #5e5d59;
+    out property <color> fg-dim: #87867f;
     // Away from a light ground is down, not up; see the dark palette.
     out property <color> fg-hot: #000000;
 
@@ -108,6 +108,8 @@ export global Light {
     //
     // The same order as `dark.slint` and as `accent-names` in theme.slint.
     out property <[Accent]> accents: [
+        { accent: #2563eb, hover: #1d4ed8, soft: #2563eb2e, on: #ffffff },   // blue
+        { accent: #c6613f, hover: #b05434, soft: #c6613f2e, on: #ffffff },   // clay
         { accent: #4d7c0f, hover: #3f680b, soft: #4d7c0f2e, on: #ffffff },   // lime
         { accent: #1f66d1, hover: #1a55b0, soft: #1f66d12e, on: #ffffff },   // sky
         { accent: #7239e6, hover: #6030c8, soft: #7239e62e, on: #ffffff },   // violet
@@ -163,16 +165,16 @@ export global Light {
     // lane" where the grid only answers "where in time". The ruler is a step
     // under the darker of the two, so the strip carrying the timestamps is the
     // floor of the pane and the banding starts below it.
-    out property <color> lane: #e9e9ed;
-    out property <color> lane-alt: #e2e2e6;
-    out property <color> ruler: #f7f7f8;
+    out property <color> lane: #efede5;
+    out property <color> lane-alt: #e8e6dc;
+    out property <color> ruler: #faf9f5;
     /// The vertical rules. 13% black, under `line-strong` for the same reason
     /// the dark palette's 14% white is: the grid places a clip, it does not
     /// compete with one.
     out property <color> grid: #00000021;
-    // Lime, the palette's second accent, as a colour of its own; see the
+    // Blue, the palette's first accent, as a colour of its own; see the
     // dark palette. Settings > Appearance can put any colour in its place.
-    out property <color> playhead: #4d7c0f;
+    out property <color> playhead: #2563eb;
     // Drawn on the audio clip's own light ground, so it is a *darker* wash of
     // the kind's hue — the dark palette's light one would vanish into it.
     out property <color> wave: #16703bb3;          // 0.7 alpha
@@ -243,6 +245,10 @@ export global Light {
     // panel for the gutters to read as gaps rather than as seams, and still a
     // step under the darkest surface inside a pane, so a pane's floor never
     // mistakes itself for the space between panes.
-    out property <color> page: #d2d2d9;
-    out property <color> page-fg-muted: #56565e;
+    out property <color> page: #f0eee6;
+    out property <color> sidebar: #f3f1ea;
+    out property <color> sidebar-hover: #e8e6dc;
+    out property <color> sidebar-active: #dedbd0;
+    out property <color> gutter: #dedbd0;
+    out property <color> page-fg-muted: #5e5d59;
 }

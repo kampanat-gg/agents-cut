@@ -52,7 +52,8 @@ export global Theme {
     /// Settings > Appearance picks it (lib.rs, `on_settings_accent_changed`)
     /// the way it picks `dark`, and it retones the window the same way.
     /// Remembered by name rather than by number, so a list that grows or
-    /// reorders keeps everyone's choice; 0 is Lime, the default. One past
+    /// reorders keeps everyone's choice; 0 is Blue, the default, as Claude's
+    /// app is. One past
     /// the last name is the custom colour, `accent-custom`.
     in-out property <int> accent-choice: 0;
     /// A colour picked by hand in place of any on the list. Read only while
@@ -69,7 +70,7 @@ export global Theme {
     /// name is the English word Settings shows for it, and the id it is
     /// remembered under in settings.json, lower-cased; the dialog holds the
     /// same list wrapped for translation, in this order.
-    out property <[string]> accent-names: ["Lime", "Sky", "Violet", "Rose", "Amber", "Mint"];
+    out property <[string]> accent-names: ["Blue", "Clay", "Lime", "Sky", "Violet", "Rose", "Amber", "Mint"];
     /// The playhead's colour when one was picked by hand in Settings >
     /// Appearance, in place of the palette's own. Read only while
     /// `playhead-is-custom`, and one colour under both palettes, for the
@@ -98,20 +99,30 @@ export global Theme {
     // technical` is for timecode, the ruler, clip labels, paths, dimensions,
     // counts — anything you read as a *value* rather than as language.
     //
-    // Both are Hanken Grotesk, the one face this build bundles (app.slint).
-    // The split between the roles stays so that the two can differ again
-    // without touching a single element.
-    out property <string> font: "Hanken Grotesk";
-    out property <string> font-technical: "Hanken Grotesk";
+    // Both are Inter, bundled (concat-text's BASE_FONTS): a face drawn for
+    // interface text at small sizes, with the open spacing Claude's app
+    // reads at. The Mac's own San Francisco was tried and set too tight -
+    // its variable file carries an optical-size axis a browser moves for
+    // small text and this renderer leaves at the display end, which closed
+    // the gaps between letters and very nearly between words.
+    out property <string> font: "Inter";
+    out property <string> font-technical: "Inter";
+    /// What the agent says, in the conversation: the interface's own face,
+    /// as Claude's desktop app sets its answers - one family through the
+    /// whole window.
+    out property <string> font-reading: "Inter";
     /// The scale. `fs` is the body size everything inherits; the two either
     /// side of it are the dense readout and the panel title. `xl` is for the
     /// few lines that are content rather than chrome — a project's name in a
     /// list — and `display` is the launch screen's heading and nothing else.
-    out property <length> fs-xs: 10px;
-    out property <length> fs-sm: 11px;
-    out property <length> fs: 12px;
-    out property <length> fs-lg: 13px;
-    out property <length> fs-xl: 14px;
+    ///
+    /// A step up from an editor's dense default, to the sizes Claude's app
+    /// reads at: 13 for the body, 15 for what is read as prose.
+    out property <length> fs-xs: 11px;
+    out property <length> fs-sm: 12px;
+    out property <length> fs: 13px;
+    out property <length> fs-lg: 14px;
+    out property <length> fs-xl: 15px;
     out property <length> fs-input: 15px;
     out property <length> fs-display: 34px;
 
@@ -127,6 +138,8 @@ export global Theme {
     // touching a colour token, and every face is bundled, so it costs nothing
     // at runtime. Reach for it rather than nudging a surface to compensate.
     out property <int> weight-body: 400;
+    /// Medium, as Claude's app sets its titles and buttons: the window
+    /// registers Inter's Medium for it (fonts.rs).
     out property <int> weight-title: 500;
     /// The launch screen's heading, and the wordmark in the title bar. The one
     /// weight above `title`, and the only place the type gets to be loud. Bold
@@ -135,10 +148,11 @@ export global Theme {
 
     // ── shape ────────────────────────────────────────────────────────────
     //
-    // radii
-    out property <length> r-xs: 3px;
-    out property <length> r-sm: 5px;
-    out property <length> r: 7px;
+    // radii, measured off Claude's own window: 8 for a row or a button,
+    // 12 for a card, and the two below them for what sits inside those.
+    out property <length> r-xs: 4px;
+    out property <length> r-sm: 6px;
+    out property <length> r: 8px;
     out property <length> r-lg: 12px;
     /// The dialog sheet, and nothing smaller. A modal is the largest rounded
     /// thing in the window and wants a corner to match.
@@ -285,6 +299,10 @@ export global Theme {
 
     // the window ground the panes float on
     out property <color> page: dark ? Dark.page : Light.page;
+    out property <color> sidebar: dark ? Dark.sidebar : Light.sidebar;
+    out property <color> sidebar-hover: dark ? Dark.sidebar-hover : Light.sidebar-hover;
+    out property <color> sidebar-active: dark ? Dark.sidebar-active : Light.sidebar-active;
+    out property <color> gutter: dark ? Dark.gutter : Light.gutter;
     out property <color> page-fg-muted: dark ? Dark.page-fg-muted : Light.page-fg-muted;
 
     // ── content ──────────────────────────────────────────────────────────

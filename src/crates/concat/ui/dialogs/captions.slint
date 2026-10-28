@@ -8,6 +8,7 @@ import { Button, CopyChip, DialogRow, DialogSection, Modal, Progress } from "../
 import { SegmentedControl } from "../primitives/segmented-control.slint";
 import { Select } from "../primitives/select.slint";
 import { Switch } from "../inspector/controls.slint";
+import { Build } from "../build.slint";
 
 // Captions: what the tray's Captions tool opens.
 //
@@ -157,8 +158,9 @@ export component CaptionsDialog inherits Modal {
         // The switch, under the script it stands in for: off, the words
         // are typed above it; on, they come from a clip's voice, chosen
         // under it. A row of its own rather than a DialogRow, whose label
-        // column is too narrow for the words.
-        if !root.data.running: HorizontalLayout {
+        // column is too narrow for the words. Not in a build with no
+        // transcriber, which has the script alone.
+        if !root.data.running && Build.speech-ai: HorizontalLayout {
             padding-left: 14px;
             padding-right: 14px;
             padding-top: 14px;

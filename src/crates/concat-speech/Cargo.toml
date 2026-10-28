@@ -42,13 +42,15 @@ log = { version = "0.4", features = ["std"] }
 # Transcription: whisper.cpp in-process. Built from source by cmake at build
 # time; on macOS with Metal so the encoder runs on the GPU. `raw-api` for
 # ggml's backend registry: where whisper.cpp is a shared build, its CPU
-# kernels are loaded by hand (transcribe.rs, `cpu_backend`).
-whisper-rs = { version = "0.16", features = ["raw-api"] }
+# kernels are loaded by hand (transcribe.rs, `cpu_backend`). Behind
+# `whisper`.
+whisper-rs = { version = "0.16", optional = true, features = ["raw-api"] }
 
 # Text to speech: the official k2-fsa bindings. Linked statically on the
-# desktop Unixes, so the binary carries no extra dylibs.
+# desktop Unixes, so the binary carries no extra dylibs - and so the
+# binary carries a hundred megabytes of them, hence `voices`.
 [target.'cfg(not(windows))'.dependencies]
-sherpa-onnx = "1.13"
+sherpa-onnx = { version = "1.13", optional = true }
 
 # Elsewhere it is the shared library.
 #
@@ -66,10 +68,10 @@ sherpa-onnx = "1.13"
 # panics under the custom `app` profile. Keeping the DLLs out of the lib
 # directory skips that code path; packaging ships them explicitly.
 [target.'cfg(windows)'.dependencies]
-sherpa-onnx = { version = "1.13", default-features = false, features = ["shared"] }
+sherpa-onnx = { version = "1.13", optional = true, default-features = false, features = ["shared"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-whisper-rs = { version = "0.16", features = ["metal"] }
+whisper-rs = { version = "0.16", optional = true, features = ["metal"] }
 # The CoreML provider, so Chatterbox can run on the Mac's own GPU and Neural
 # Engine when Settings › Speech asks for it. Pulls pyke's CoreML build of the
 # runtime in place of the plain one.
@@ -81,8 +83,17 @@ ort = { workspace = true, optional = true, features = ["coreml"] }
 [target.'cfg(target_os = "windows")'.dependencies]
 ort = { workspace = true, optional = true, features = ["directml"] }
 
+# Each engine is its own feature, all off by default: together they are
+# most of the desktop app's size, and a build that leaves them out still
+# compiles every type and table the window reads, with the work itself
+# answering that it is not part of the build.
 [features]
-chatterbox = ["dep:ort", "dep:tokenizers", "dep:concat-vision"]
+# Captions from speech: whisper.cpp.
+whisper = ["dep:whisper-rs"]
+# Narration: Kokoro and Pocket TTS, through sherpa-onnx.
+voices = ["dep:sherpa-onnx"]
+# Chatterbox is read alongside the others, so it needs them.
+chatterbox = ["voices", "dep:ort", "dep:tokenizers", "dep:concat-vision"]
 
 [lints]
 workspace = true

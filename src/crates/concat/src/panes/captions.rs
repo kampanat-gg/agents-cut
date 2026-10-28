@@ -145,7 +145,7 @@ impl CaptionsPane {
             CaptionsMsg::OpenOnClip(id) => self.open_on(studio, Some(id), true),
             CaptionsMsg::Close => self.open = false,
             CaptionsMsg::VoiceToggled(on) => {
-                self.from_voice = on;
+                self.from_voice = on && cfg!(feature = "speech");
                 self.message.clear();
                 let sources = sources(studio);
                 if on
@@ -371,7 +371,9 @@ impl CaptionsPane {
         let model = installed.iter().position(|model| model.active).unwrap_or(0);
         let sources = sources(studio);
         let sounding = clip.filter(|id| sources.iter().any(|source| &source.id == id));
-        let from_voice = voice || sounding.is_some();
+        // A build with no transcriber has the script alone, whatever the
+        // sheet was opened on.
+        let from_voice = cfg!(feature = "speech") && (voice || sounding.is_some());
         let clip = sounding.or_else(|| {
             from_voice
                 .then(|| sources.first().map(|source| source.id.clone()))

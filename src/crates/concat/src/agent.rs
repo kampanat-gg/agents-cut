@@ -47,19 +47,83 @@ const ALLOWED: &str = "mcp__concat";
 /// other, or one chained after it, is refused without asking.
 const CODEX_RULE: &str = "Bash(codex exec:*)";
 
+/// Claude Code's own tools the agent has, past the shell: reading and
+/// searching, writing (inside the project, by the rules in `start`), and
+/// the web.
+const TOOLS: &str = "Read,Glob,Grep,Write,Edit,WebSearch,WebFetch";
+
+/// The MCP servers of the user's own Claude Code that give voices - an
+/// ElevenLabs connector on claude.ai, or one added by hand - by the name
+/// their tools carry. Read once in the background (`claude mcp list` is a
+/// few seconds of health checks), and empty until then.
+static VOICE_SERVERS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Starts reading which voice servers the user's Claude Code has.
+pub fn discover_servers() {
+    let Some(claude) = find("claude") else {
+        return;
+    };
+    let _ = std::thread::Builder::new()
+        .name("agent-servers".to_owned())
+        .spawn(move || {
+            let listed = Command::new(&claude)
+                .args(["mcp", "list"])
+                .env("PATH", search_path(&claude))
+                .stdin(Stdio::null())
+                .output();
+            let Ok(listed) = listed else {
+                return;
+            };
+            let found = voice_servers_in(&String::from_utf8_lossy(&listed.stdout));
+            log::info!("agent: voice servers {found:?}");
+            if let Ok(mut servers) = VOICE_SERVERS.lock() {
+                *servers = found;
+            }
+        });
+}
+
+fn voice_servers() -> Vec<String> {
+    VOICE_SERVERS
+        .lock()
+        .map(|servers| servers.clone())
+        .unwrap_or_default()
+}
+
+/// The voice servers in `claude mcp list`'s output, named as their tools
+/// are: "claude.ai ElevenLabs (2): https://... - ✔ Connected" is
+/// `claude_ai_ElevenLabs_2`. One that needs signing in is left out.
+fn voice_servers_in(listing: &str) -> Vec<String> {
+    listing
+        .lines()
+        .filter(|line| line.to_lowercase().contains("elevenlabs"))
+        .filter(|line| !line.contains("Needs authentication"))
+        .filter_map(|line| line.split_once(": ").map(|(name, _)| name))
+        .map(|name| {
+            let mut tool = String::new();
+            for c in name.chars() {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    tool.push(c);
+                } else if !tool.ends_with('_') {
+                    tool.push('_');
+                }
+            }
+            tool.trim_matches('_').to_owned()
+        })
+        .collect()
+}
+
 /// How long a turn may say nothing before the sidebar says it is waiting:
 /// a first start can sit behind a system prompt (a privacy question about
 /// the folder, a Keychain question) that nobody sees.
 const QUIET: std::time::Duration = std::time::Duration::from_secs(20);
 
-/// The models the sidebar offers: `claude --model`'s alias, or none for the
-/// user's own default, and the name the chip shows.
-pub const MODELS: [(&str, &str); 5] = [
-    ("", "Claude"),
-    ("fable", "Fable"),
-    ("opus", "Opus"),
-    ("sonnet", "Sonnet"),
-    ("haiku", "Haiku"),
+/// The models the sidebar offers: `claude --model`'s alias, and the name
+/// the chip shows.
+pub const MODELS: [(&str, &str); 4] = [
+    ("fable", "Fable 5.1"),
+    ("opus", "Opus 5.5"),
+    ("sonnet", "Sonnet 5.5"),
+    ("haiku", "Haiku 5.5"),
 ];
 
 /// The efforts it offers, as `claude --effort` takes them; none is the
@@ -117,6 +181,8 @@ struct Turn {
 struct Step {
     label: String,
     detail: String,
+    /// Who does it; see [`brand_of`].
+    brand: &'static str,
     /// 0 running, 1 done, 2 failed: [`AgentStep::state`].
     state: i32,
     began: Instant,
@@ -156,9 +222,11 @@ pub struct Chat {
     shown: bool,
     /// Indexes into [`MODELS`] and [`EFFORTS`].
     model: usize,
+    /// The model was picked here rather than read from Claude Code's own
+    /// settings, so a turn names it; one read there is left to Claude
+    /// Code, which knows it more exactly - `opus[1m]` is more than `opus`.
+    picked: bool,
     effort: usize,
-    /// The open project's style, for the strip above the box.
-    style_name: String,
     /// Words for the box, from files attached, and a count that tells the
     /// box there is more.
     attached: String,
@@ -180,9 +248,9 @@ impl Default for Chat {
             tick: slint::Timer::default(),
             server: None,
             shown: true,
-            model: 0,
+            model: 1,
+            picked: false,
             effort: 0,
-            style_name: String::new(),
             attached: String::new(),
             attached_token: 0,
             watch: slint::Timer::default(),
@@ -211,10 +279,6 @@ impl Chat {
     /// with, in the interface's language; none for a project without one.
     pub fn load_style(&mut self, folder: &Path) {
         let style = crate::styles::of_project(folder);
-        self.style_name = style
-            .as_ref()
-            .map(|style| style.name().to_owned())
-            .unwrap_or_default();
         let starters: Vec<AgentStarter> = style
             .map(|style| {
                 style
@@ -239,14 +303,14 @@ impl Chat {
         self.shown = shown;
     }
 
-    /// Takes the model and effort the preferences remember.
+    /// Takes the model and effort the preferences remember; with no model
+    /// remembered, the one Claude Code itself is set to.
     pub fn remember(&mut self, model: Option<&str>, effort: Option<&str>) {
-        let model = model.unwrap_or_default();
         let effort = effort.unwrap_or_default();
-        self.model = MODELS
-            .iter()
-            .position(|(alias, _)| *alias == model)
-            .unwrap_or(0);
+        let remembered =
+            model.and_then(|model| MODELS.iter().position(|(alias, _)| *alias == model));
+        self.picked = remembered.is_some();
+        self.model = remembered.unwrap_or_else(own_model);
         self.effort = EFFORTS
             .iter()
             .position(|level| *level == effort)
@@ -254,10 +318,11 @@ impl Chat {
     }
 
     /// Picks a model by its index in [`MODELS`]; its alias, for the
-    /// preferences, or None for the default.
+    /// preferences.
     pub fn choose_model(&mut self, index: usize) -> Option<String> {
         self.model = index.min(MODELS.len() - 1);
-        Some(MODELS[self.model].0.to_owned()).filter(|alias| !alias.is_empty())
+        self.picked = true;
+        Some(MODELS[self.model].0.to_owned())
     }
 
     /// Picks an effort by its index in [`EFFORTS`]; as for the model.
@@ -281,7 +346,6 @@ impl Chat {
         agent.set_shown(self.shown);
         agent.set_model(self.model as i32);
         agent.set_effort(self.effort as i32);
-        agent.set_style_name(self.style_name.as_str().into());
         if agent.get_attached_token() != self.attached_token {
             agent.set_attached_text(self.attached.as_str().into());
             agent.set_attached_token(self.attached_token);
@@ -316,6 +380,7 @@ impl Chat {
             detail: detail.into(),
             state,
             steps: Default::default(),
+            brand: Default::default(),
             open: false,
             elapsed: Default::default(),
         });
@@ -375,6 +440,10 @@ impl Chat {
                 .max()
                 .unwrap_or_default()
         };
+        let brand = running
+            .filter(|_| group.live)
+            .map(|step| group.steps[step].brand)
+            .unwrap_or_default();
         let title = match running {
             Some(step) if group.live => group.steps[step].label.clone(),
             _ if group.live => group
@@ -393,6 +462,7 @@ impl Chat {
             .map(|(at, step)| AgentStep {
                 label: step.label.as_str().into(),
                 detail: step.detail.as_str().into(),
+                brand: step.brand.into(),
                 state: step.state,
                 time: step.took.map(seconds).unwrap_or_default().into(),
                 last: at == last,
@@ -410,6 +480,7 @@ impl Chat {
                 1
             },
             steps: slint::ModelRc::from(Rc::new(VecModel::from(steps))),
+            brand: brand.into(),
             open: group.open,
             elapsed: duration(span).into(),
         };
@@ -496,6 +567,7 @@ impl Chat {
                 group.steps.push(Step {
                     label,
                     detail,
+                    brand: brand_of(&name),
                     state: 0,
                     began: Instant::now(),
                     took: None,
@@ -567,11 +639,32 @@ fn start(studio: &mut Studio, text: &str) -> Result<(), String> {
 
     let mut brief = BRIEF.replace("{path}", &project);
     let mut command = Command::new(&claude);
+    // Not strict: the user's own servers and claude.ai connectors load as
+    // well, which is how ElevenLabs reaches the agent with no key to paste.
+    // Only the ones allowed below can run; a `-p` turn refuses the rest
+    // without asking.
     command
         .args(["-p", "--output-format", "stream-json", "--verbose"])
-        .arg("--strict-mcp-config")
         .arg("--mcp-config")
         .arg(&config);
+    // Reading anywhere, writing only inside the project's folder - a
+    // script, captions, notes for the channel - and the web for research.
+    let inside = format!("/{}/**", project.trim_end_matches('/'));
+    let mut allowed: Vec<String> = vec![
+        ALLOWED.to_owned(),
+        "Read".to_owned(),
+        "Glob".to_owned(),
+        "Grep".to_owned(),
+        "WebSearch".to_owned(),
+        "WebFetch".to_owned(),
+        format!("Edit({inside})"),
+        format!("Write({inside})"),
+    ];
+    allowed.extend(
+        voice_servers()
+            .into_iter()
+            .map(|server| format!("mcp__{server}")),
+    );
     if find("codex").is_some() {
         // A model named for Codex, where the user's own default is one
         // their sign-in cannot use.
@@ -586,17 +679,15 @@ fn start(studio: &mut Studio, text: &str) -> Result<(), String> {
                 .replace("{path}", &project)
                 .replace("{model}", &model),
         );
-        command
-            .args(["--tools", "Bash,Read,Glob"])
-            .args(["--allowedTools", ALLOWED, CODEX_RULE]);
+        allowed.push(CODEX_RULE.to_owned());
+        command.args(["--tools", &format!("Bash,{TOOLS}")]);
     } else {
-        command
-            .args(["--tools", "Read,Glob"])
-            .args(["--allowedTools", ALLOWED]);
+        command.args(["--tools", TOOLS]);
     }
+    command.arg("--allowedTools").args(&allowed);
     command.arg("--append-system-prompt").arg(brief);
     let (model, effort) = (MODELS[studio.agent.model].0, EFFORTS[studio.agent.effort]);
-    if !model.is_empty() {
+    if studio.agent.picked {
         command.args(["--model", model]);
     }
     if !effort.is_empty() {
@@ -655,6 +746,32 @@ fn start(studio: &mut Studio, text: &str) -> Result<(), String> {
 /// Files the user attached: copied into the project's `assets/` (a file
 /// already inside the project is used where it is) and named in the box
 /// as `@assets/<name>`, which the brief tells the agent how to read.
+/// The model Claude Code runs when not told one, as an index into
+/// [`MODELS`]: `ANTHROPIC_MODEL`, else the `model` of its settings file -
+/// "opus[1m]", "claude-sonnet-5-5" - by the family it names; Opus when
+/// neither says.
+fn own_model() -> usize {
+    let settings = || {
+        let folder = std::env::var_os("CLAUDE_CONFIG_DIR")
+            .map(PathBuf::from)
+            .or_else(|| dirs::home_dir().map(|home| home.join(".claude")))?;
+        let text = std::fs::read_to_string(folder.join("settings.json")).ok()?;
+        let value: Value = serde_json::from_str(&text).ok()?;
+        value.get("model")?.as_str().map(str::to_owned)
+    };
+    let named = std::env::var("ANTHROPIC_MODEL").ok().or_else(settings);
+    family(named.as_deref().unwrap_or_default())
+}
+
+/// The model a name means, by the family in it.
+fn family(name: &str) -> usize {
+    let name = name.to_lowercase();
+    MODELS
+        .iter()
+        .position(|(alias, _)| name.contains(alias))
+        .unwrap_or(1)
+}
+
 pub fn attach(studio: &mut Studio, files: Vec<PathBuf>) {
     let Some(project) = studio
         .session
@@ -840,6 +957,22 @@ fn quoted(command: &str) -> Option<&str> {
 /// A tool call in words, for its step: what it does, and under it what
 /// it does that to. The editor's tools by what they are for, a Codex call
 /// by the picture it was asked for, a read by the file's name.
+/// Who a tool call is the work of, by its name: Codex for the shell
+/// (the one command the agent may run is `codex exec`), ElevenLabs for
+/// its connector's tools, Claude for its own reading, writing and
+/// searching, and no one for the editor's own tools.
+pub fn brand_of(name: &str) -> &'static str {
+    if name.to_lowercase().contains("elevenlabs") {
+        "elevenlabs"
+    } else if name == "Bash" {
+        "codex"
+    } else if name.starts_with("mcp__") {
+        ""
+    } else {
+        "claude"
+    }
+}
+
 pub fn describe(name: &str, input: &Value) -> (String, String) {
     let tool = name.rsplit("__").next().unwrap_or(name);
     let text = |key: &str| input[key].as_str().unwrap_or_default();
@@ -872,6 +1005,40 @@ pub fn describe(name: &str, input: &Value) -> (String, String) {
             String::new(),
         ),
         "Glob" | "Grep" => (t("agent.step.browse"), String::new()),
+        "Write" | "Edit" => (
+            tf("agent.step.write", &[&file_name("file_path")]),
+            String::new(),
+        ),
+        "WebSearch" => (t("agent.step.search"), clip(text("query"))),
+        "WebFetch" => (t("agent.step.fetch"), clip(text("url"))),
+        "media_fetch" => (
+            tf(
+                "agent.step.import",
+                &[&Path::new(
+                    input["name"]
+                        .as_str()
+                        .or_else(|| text("url").rsplit('/').next())
+                        .unwrap_or_default(),
+                )
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default()],
+            ),
+            String::new(),
+        ),
+        // ElevenLabs' creative tools: what kind of sound is being made.
+        "creative_generate_speech" => (t("agent.step.voice"), clip(text("prompt"))),
+        "creative_generate_in_flow" => match text("node_type") {
+            "music" => (t("agent.step.music"), clip(text("prompt"))),
+            "sfx" => (t("agent.step.sfx"), clip(text("prompt"))),
+            "speech-to-text" => (t("agent.step.transcribe"), String::new()),
+            "tts" => (t("agent.step.voice"), clip(text("prompt"))),
+            _ => (t("agent.step.elevenlabs"), clip(text("prompt"))),
+        },
+        "creative_get_flow_run_status" | "creative_get_flow" => {
+            (t("agent.step.waiting"), String::new())
+        }
+        "creative_list_voices" => (t("agent.step.voices"), String::new()),
         "project_open" => (t("agent.step.open"), String::new()),
         "project_get" | "timeline_read" => (t("agent.step.read"), String::new()),
         "media_import" => (
@@ -1115,6 +1282,38 @@ fn search_path(claude: &Path) -> std::ffi::OsString {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_step_names_who_does_it() {
+        assert_eq!(brand_of("Bash"), "codex");
+        assert_eq!(brand_of("Read"), "claude");
+        assert_eq!(brand_of("WebSearch"), "claude");
+        assert_eq!(brand_of("mcp__concat__clip_add"), "");
+        assert_eq!(
+            brand_of("mcp__claude_ai_ElevenLabs_2__creative_generate_speech"),
+            "elevenlabs"
+        );
+    }
+
+    #[test]
+    fn voice_servers_are_named_as_their_tools_are() {
+        let listing = "claude.ai Claude Docs: https://api.anthropic.com/v1/pages/mcp - ✔ Connected\n\
+            claude.ai ElevenLabs: https://api.elevenlabs.io/v1/mcp-claude-marketplace - ! Needs authentication\n\
+            claude.ai ElevenLabs (2): https://api.elevenlabs.io/v1/mcp - ✔ Connected\n\
+            elevenlabs: uvx elevenlabs-mcp - ✔ Connected";
+        assert_eq!(
+            voice_servers_in(listing),
+            ["claude_ai_ElevenLabs_2", "elevenlabs"]
+        );
+    }
+
+    #[test]
+    fn claude_codes_own_model_is_read_by_its_family() {
+        assert_eq!(MODELS[family("opus[1m]")].0, "opus");
+        assert_eq!(MODELS[family("claude-sonnet-5-5")].0, "sonnet");
+        assert_eq!(MODELS[family("Haiku")].0, "haiku");
+        assert_eq!(MODELS[family("")].0, "opus");
+    }
 
     #[test]
     fn the_stream_reads_as_the_sidebar_needs_it() {

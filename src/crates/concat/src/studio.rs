@@ -6837,7 +6837,14 @@ impl Studio {
     /// Starts the analysis for the first media whose cutout wants masks
     /// that are not there, unless one is running. Called after every
     /// change; the finished job calls it again for whatever is next.
+    ///
+    /// Never in a build without the models: a project cut in one that had
+    /// them keeps the masks it found, and asking for more would only fail
+    /// again after every change.
     pub fn ensure_cutouts(&mut self) {
+        if !cfg!(feature = "vision-ai") {
+            return;
+        }
         if !self.cutout_jobs.is_empty() || self.host.cutouts.is_busy() {
             return;
         }
@@ -9465,16 +9472,7 @@ impl Studio {
         let mut out = DockLayout::default();
         let (width, height) = self.workspace;
         if width > SEAT_GAP * 2.0 && height > SEAT_GAP * 2.0 {
-            lay_out(
-                &self.dock,
-                (
-                    SEAT_GAP,
-                    SEAT_GAP,
-                    width - 2.0 * SEAT_GAP,
-                    height - 2.0 * SEAT_GAP,
-                ),
-                &mut out,
-            );
+            lay_out(&self.dock, (0.0, 0.0, width, height), &mut out);
         }
         out
     }
@@ -9513,6 +9511,8 @@ impl Studio {
                 })
                 .collect(),
         );
+
+        self.publish_videos();
 
         let timeline = self.timeline();
         let mut top = 0.0;
@@ -11300,8 +11300,12 @@ impl Studio {
 
     /// Starts reading the first smart stroke whose region is not there
     /// yet, unless one is being read. Called after every change, and by
-    /// the finished job for whatever is next.
+    /// the finished job for whatever is next. Never in a build without
+    /// the brush model, for the reason [`Self::ensure_cutouts`] gives.
     pub fn ensure_regions(&mut self) {
+        if !cfg!(feature = "vision-ai") {
+            return;
+        }
         if self.region_job.is_some() || self.host.brushes.is_busy() {
             return;
         }
@@ -11971,14 +11975,17 @@ impl Studio {
             // sheet, opened on this clip. Here so the transcriber is found
             // where the sound is, not only on the tray (#302). The captions
             // land on a text lane above, not on this clip's track, so a
-            // locked track does not grey it.
-            rows.push(action(
-                "captions",
-                t("captions.generateCaptions"),
-                Glyph::TextMark,
-                "",
-                self.clip_has_sound(clip),
-            ));
+            // locked track does not grey it. Not in a build with no
+            // transcriber.
+            if cfg!(feature = "speech") {
+                rows.push(action(
+                    "captions",
+                    t("captions.generateCaptions"),
+                    Glyph::TextMark,
+                    "",
+                    self.clip_has_sound(clip),
+                ));
+            }
             rows.push(rule());
         }
         let audible = clip.kind != model::ClipKind::Image;
@@ -12161,6 +12168,7 @@ impl Studio {
         let has_selection_media = !self.media.selected.is_empty();
 
         match self.open_menu {
+            // Text to speech has no row in a build without the voices.
             0 => vec![
                 row(
                     "add-selected",
@@ -12261,7 +12269,10 @@ impl Studio {
                     checkable: false,
                     checked: false,
                 },
-            ],
+            ]
+            .into_iter()
+            .filter(|row| cfg!(feature = "speech") || row.id.as_str() != "speech")
+            .collect(),
             1 => vec![
                 row(
                     "undo",

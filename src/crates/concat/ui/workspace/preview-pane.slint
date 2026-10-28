@@ -9,10 +9,12 @@ import { IconButton } from "../primitives/panel.slint";
 import { Tip } from "../primitives/tooltip.slint";
 import { NumberField } from "../primitives/number-field.slint";
 import { Select } from "../primitives/select.slint";
-import { Pane, PaneHeader } from "pane.slint";
-import { PaneKind, PaneSwitcher } from "pane-switcher.slint";
+import { Pane } from "pane.slint";
+import { PaneKind } from "pane-switcher.slint";
 import { ClipKind, StageGuideData, StageItemData } from "../timeline/model.slint";
 import { ContextMenu, MenuMetrics, MenuRow } from "../primitives/context-menu.slint";
+import { Editor } from "../editor.slint";
+import { QuickBar } from "quick-bar.slint";
 
 // The programme monitor: a header that says what the output is, a stage on a
 // sunken viewport, and a transport tray under it in three parts — timecode on
@@ -831,33 +833,8 @@ export component PreviewPane inherits Rectangle {
     changed frames => { root.seed(); }
 
     Pane {
-        if !root.bare: PaneHeader {
-            title: I18n.t("common.preview");
-
-            // The output, stated rather than implied. Tabular-ish and dim: it
-            // is a fact about the project, not a control.
-            VerticalLayout {
-                alignment: center;
-                Text {
-                    text: "\{root.output-width} × \{root.output-height} · \{Math.round(root.frame-rate)} fps";
-                    color: Theme.fg-dim;
-                    font-family: Theme.font-technical;
-                    font-size: Theme.fs;
-                    vertical-alignment: center;
-                }
-            }
-
-            VerticalLayout {
-                alignment: center;
-                PaneSwitcher {
-                    kind: PaneKind.preview;
-                    seat: root.pane-seat;
-                    removable: root.pane-removable;
-                    picked(kind) => { root.pane-picked(kind); }
-                    removed => { root.pane-removed(); }
-                }
-            }
-        }
+        // No header: the frame's size and rate are on the video's card in
+        // the side panel, and the monitor gives the picture the height.
 
         // ── the viewport ─────────────────────────────────────────────────
         viewport := Rectangle {
@@ -927,6 +904,17 @@ export component PreviewPane inherits Rectangle {
                     self.fitted = false;
                 }
             }
+            // A picture no larger than the pane would fit it goes back to
+            // following the pane when the pane changes: only one zoomed in
+            // past fitting keeps its scale, for the detail it was zoomed to.
+            changed room-w => { self.refit(); }
+            changed room-h => { self.refit(); }
+            function refit() {
+                if (!self.fitted && self.zoom <= self.fit-scale * 1.001) {
+                    self.fit();
+                }
+            }
+
             public function fit() {
                 self.fitted = true;
                 self.pan-x = 0;
@@ -979,6 +967,12 @@ export component PreviewPane inherits Rectangle {
                         viewport.zoom-about(
                             Math.max(0.5, Math.min(2.0, Math.pow(1.0025, event.delta-y / 1px))),
                             self.mouse-x, self.mouse-y);
+                        return EventResult.accept;
+                    }
+                    // A fitted picture stays fitted: there is nowhere to
+                    // pan to, and a stray scroll used to unfit it for good,
+                    // after which the picture no longer grew with the pane.
+                    if (viewport.fitted) {
                         return EventResult.accept;
                     }
                     // Both axes pan. A wheel with no horizontal axis of its
@@ -1096,6 +1090,28 @@ export component PreviewPane inherits Rectangle {
                     frame-menu.request-x = self.absolute-position.x - root.absolute-position.x + x;
                     frame-menu.request-y = self.absolute-position.y - root.absolute-position.y + y;
                     root.frame-token += 1;
+                }
+            }
+
+            // The bar over the one clip picked, while nothing plays and no
+            // brush is out: the edits it wants most, where it is.
+            for entry in root.stage-items: Rectangle {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                height: parent.height;
+                if entry.selected && Editor.selected-count == 1 && !root.playing
+                    && !root.painting && Editor.selected-clip.present: QuickBar {
+                    stage-x: stage.x;
+                    stage-y: stage.y;
+                    stage-w: stage.width;
+                    stage-h: stage.height;
+                    cx: entry.cx;
+                    cy: entry.cy;
+                    w: entry.w;
+                    h: entry.h;
+                    room-w: parent.width;
+                    room-h: parent.height;
                 }
             }
 

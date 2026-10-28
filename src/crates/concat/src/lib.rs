@@ -373,6 +373,14 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         |studio, _, _, families| studio.system_fonts_known(families),
     );
 
+    // What of the on-device AI this build carries, for the panes to hide
+    // what it does not; see build.slint. Fixed for the life of the binary.
+    {
+        let build = app.global::<Build>();
+        build.set_speech_ai(cfg!(feature = "speech"));
+        build.set_vision_ai(cfg!(feature = "vision-ai"));
+    }
+
     // Handed over once, here, and never replaced: a fresh model is a reset,
     // and a reset rebuilds every row that hangs off it.
     {
@@ -665,6 +673,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     let editor = app.global::<Editor>();
 
     // ── the agent's sidebar ──
+    agent::discover_servers();
     {
         let agent = app.global::<ui::Agent>();
         agent.set_rows(ModelRc::from(shell.studio.borrow().agent.rows()));
@@ -705,6 +714,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
                 studio.agent.publish(app);
             });
         });
+        agent.on_mention(on_window!(|state, words: SharedString| {
+            state.agent.mention(words.as_str());
+        }));
         agent.on_toggle_steps(on_window!(|state, row: i32| {
             state.agent.toggle(row.max(0) as usize);
         }));
@@ -717,6 +729,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     {
         let files = app.global::<ui::Files>();
         files.set_rows(ModelRc::from(shell.studio.borrow().files.rows()));
+        files.set_videos(ModelRc::from(shell.studio.borrow().files.videos()));
         files.on_toggle(on_window!(|state, path: SharedString| {
             state.files.toggle(path.as_str());
         }));
@@ -2618,7 +2631,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         // fails at its first transcription, so the smoke run loads them.
         // Not elsewhere: there they are linked in, and asking ggml for its
         // devices would only bring Metal up on a Mac runner for nothing.
+        // Nor in a build without whisper, which has no kernels to load.
         #[cfg(all(
+            feature = "speech",
             target_arch = "x86_64",
             any(target_os = "windows", target_os = "linux")
         ))]

@@ -20,9 +20,18 @@ use serde::Deserialize;
 /// The file a project's style settings are copied to.
 pub const SETTINGS: &str = "style.toml";
 
-/// The folders a styled project starts with: pictures the agent made,
-/// characters to keep the same, and what the user brings.
-const FOLDERS: [&str; 3] = ["generated", "characters", "assets"];
+/// The folders a styled project starts with, one channel's worth: a folder
+/// per video under `episodes`, the sound the videos share, what every one
+/// carries, the characters kept the same, and what the user brings. The
+/// agent's brief says what goes where.
+const FOLDERS: [&str; 6] = [
+    "episodes",
+    "library/music",
+    "library/sfx",
+    "brand",
+    "characters",
+    "assets",
+];
 
 /// One built-in style's folder name, settings, recipe and preview
 /// picture, read in at build time.

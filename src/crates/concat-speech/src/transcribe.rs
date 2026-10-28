@@ -18,14 +18,22 @@
 //! 2. **Transcription.** The engine's audio decoder hands over the clip's
 //!    window as 16 kHz mono floats - the input whisper wants - and the
 //!    segments come back relative to the window.
+//!
+//! whisper.cpp is behind the `whisper` feature. Without it the table, the
+//! types and the settings' status are all here, and everything that would
+//! load or run a model answers that captions from speech are not part of
+//! this build.
 
 use std::path::PathBuf;
+#[cfg(feature = "whisper")]
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use concat_host::{AppDirs, SingleFlight};
+#[cfg(feature = "whisper")]
 use concat_media::{AudioDecoder, AudioOptions, SampleFormat};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "whisper")]
 use whisper_rs::{
     FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters, WhisperVadContext,
     WhisperVadContextParams, WhisperVadParams,
@@ -131,6 +139,7 @@ fn models_dir(dirs: &AppDirs) -> Result<PathBuf, String> {
 
 /// whisper's abort callback: `user_data` is the run's cancel flag, and a
 /// true here stops the computation where it stands. See `transcribe`.
+#[cfg(feature = "whisper")]
 unsafe extern "C" fn abort_when_set(user_data: *mut std::ffi::c_void) -> bool {
     // SAFETY: the caller passed `Arc::as_ptr` of an `AtomicBool` it keeps
     // alive for as long as whisper may call this.
@@ -155,6 +164,7 @@ unsafe extern "C" fn abort_when_set(user_data: *mut std::ffi::c_void) -> bool {
 /// would otherwise also look in. ggml logs which module it chose.
 ///
 /// Called once per process; later calls answer from the first.
+#[cfg(feature = "whisper")]
 pub fn cpu_backend() -> Result<String, String> {
     use whisper_rs::whisper_rs_sys as sys;
 
@@ -221,6 +231,12 @@ pub fn cpu_backend() -> Result<String, String> {
         .clone()
 }
 
+/// Whisper's CPU, in a build without whisper: none to name.
+#[cfg(not(feature = "whisper"))]
+pub fn cpu_backend() -> Result<String, String> {
+    Err("captions from speech are not part of this build".to_owned())
+}
+
 fn model_file(dirs: &AppDirs, id: &str) -> Result<PathBuf, String> {
     // Ids come from our own table; anything else is a bug, not input.
     known(id).ok_or_else(|| format!("unknown model {id:?}"))?;
@@ -234,11 +250,13 @@ fn model_file(dirs: &AppDirs, id: &str) -> Result<PathBuf, String> {
 /// the silence between them went to the next line, which came up seconds
 /// before anyone spoke (#438). Under a megabyte, so it ships inside the
 /// app rather than as a second download.
+#[cfg(feature = "whisper")]
 const VAD_MODEL: &[u8] = include_bytes!("../assets/ggml-silero-v6.2.0.bin");
 
 /// The spans of `samples` (16 kHz mono) that are speech, in seconds, by
 /// Silero VAD. Empty when the model cannot be had or will not run: the
 /// captions then keep whisper's own times, as they always did.
+#[cfg(feature = "whisper")]
 fn speech_spans(dirs: &AppDirs, samples: &[f32], threads: usize) -> Vec<(f64, f64)> {
     let spans = vad_model(dirs).and_then(|path| {
         let path = path
@@ -270,6 +288,7 @@ fn speech_spans(dirs: &AppDirs, samples: &[f32], threads: usize) -> Vec<(f64, f6
 /// voice detector knows where the words begin and end. A caption over no
 /// detected speech - a whisper too quiet for the detector, say - keeps the
 /// times whisper gave it.
+#[cfg(any(feature = "whisper", test))]
 fn on_speech(start: f64, end: f64, speech: &[(f64, f64)]) -> (f64, f64) {
     let mut covered = speech
         .iter()
@@ -285,6 +304,7 @@ fn on_speech(start: f64, end: f64, speech: &[(f64, f64)]) -> (f64, f64) {
 
 /// The VAD model as a file whisper can open, written beside the
 /// transcription models the first time it is wanted.
+#[cfg(feature = "whisper")]
 fn vad_model(dirs: &AppDirs) -> Result<PathBuf, String> {
     let path = models_dir(dirs)?.join("ggml-silero-v6.2.0.bin");
     let whole = std::fs::metadata(&path).is_ok_and(|meta| meta.len() == VAD_MODEL.len() as u64);
@@ -358,8 +378,11 @@ pub struct TranscribeRequest {
     pub model_id: String,
 }
 
+/// Never made in a build without whisper, where nothing loads.
+#[cfg_attr(not(feature = "whisper"), allow(dead_code))]
 struct LoadedModel {
     id: String,
+    #[cfg(feature = "whisper")]
     context: WhisperContext,
 }
 
@@ -402,7 +425,9 @@ impl Transcriber {
                     blurb: model.blurb.to_owned(),
                     english_only: model.english_only,
                     size_bytes: model.approx_bytes,
-                    downloaded: dir.join(format!("ggml-{}.bin", model.id)).is_file(),
+                    // A file this build cannot run is not one it has.
+                    downloaded: cfg!(feature = "whisper")
+                        && dir.join(format!("ggml-{}.bin", model.id)).is_file(),
                 })
                 .collect(),
         })
@@ -420,6 +445,9 @@ impl Transcriber {
         id: &str,
         mut progress: impl FnMut(DownloadProgress),
     ) -> Result<(), String> {
+        if !cfg!(feature = "whisper") {
+            return Err("captions from speech are not part of this build".to_owned());
+        }
         let job = self.downloads.begin("model download")?;
         let destination = model_file(dirs, id)?;
         if destination.is_file() {
@@ -494,6 +522,7 @@ impl Transcriber {
     /// Timestamps come back relative to the window: 0 is `source_start`. The
     /// caller owns the clip, so the map onto the timeline (divide by speed,
     /// add the clip's start) happens there, next to the numbers it needs.
+    #[cfg(feature = "whisper")]
     pub fn transcribe(
         &self,
         dirs: &AppDirs,
@@ -643,6 +672,18 @@ impl Transcriber {
             .collect())
     }
 
+    /// Transcribes one clip's audio window: in a build without whisper,
+    /// nothing to transcribe it with, said as an error.
+    #[cfg(not(feature = "whisper"))]
+    pub fn transcribe(
+        &self,
+        _dirs: &AppDirs,
+        _request: &TranscribeRequest,
+        _progress: impl FnMut(JobStage) + Send + 'static,
+    ) -> Result<Vec<Segment>, String> {
+        Err("captions from speech are not part of this build".to_owned())
+    }
+
     /// Asks the running transcription to stop at its next check.
     pub fn cancel(&self) {
         self.gate.cancel();
@@ -657,6 +698,7 @@ impl Transcriber {
 /// Whisper marks silence and music with bracketed stage directions
 /// ("[BLANK_AUDIO]", "(upbeat music)"). Those are not captions, and neither
 /// is an empty or degenerate span.
+#[cfg(any(feature = "whisper", test))]
 fn keep_segment(start: f64, end: f64, text: String) -> Option<Segment> {
     if text.is_empty() || (text.starts_with('[') && text.ends_with(']')) {
         return None;

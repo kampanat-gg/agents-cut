@@ -19,19 +19,30 @@
 //! One stroke at a time through a [`SingleFlight`]; the window queues the
 //! rest behind it. An embedding is kept for a few frames, so a second
 //! stroke on the same frame costs the decoder alone.
+//!
+//! The model runs in ONNX Runtime, behind the `infer` feature like the
+//! cutout's: without it a stroke's regions already on disk are still
+//! painted in, and [`Brushes::read`] says it cannot read new ones.
 
+#[cfg(feature = "infer")]
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+#[cfg(feature = "infer")]
+use std::sync::Mutex;
+#[cfg(feature = "infer")]
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 
+#[cfg(feature = "infer")]
 use concat_core::frame::Frame;
+#[cfg(feature = "infer")]
 use concat_core::time::{FrameRate, Rational};
+#[cfg(feature = "infer")]
 use concat_media::{DecodeOptions, Decoder, FrameSource};
 use concat_project::model::{Stroke, Subject};
-use concat_vision::{
-    Brush, Embedding, MASK_RATE, Mask, MaskStore, ModelId, mask_dir, models, region_dir,
-};
+#[cfg(feature = "infer")]
+use concat_vision::{Brush, Embedding, MASK_RATE, Mask, ModelId, models};
+use concat_vision::{MaskStore, mask_dir, region_dir};
 
 use crate::cutout::Progress;
 use crate::jobs::{SingleFlight, Tripwire};
@@ -86,21 +97,29 @@ impl RegionRequest {
 
 /// How many frames' embeddings stay in memory. Each is a few megabytes;
 /// a few frames is a session of strokes on one shot.
+#[cfg(feature = "infer")]
 const EMBEDDINGS: usize = 6;
 /// The backward walk decodes this many frames at a time and holds their
 /// embeddings, since a decoder only runs forward.
+#[cfg(feature = "infer")]
 const BACKWARD_CHUNK: usize = 8;
 
 /// A frame read lately: its media and source millisecond, and what the
 /// encoder made of it.
+#[cfg(feature = "infer")]
 type Read = ((String, u64), Arc<Embedding>);
 
 /// The brush service: the model, loaded once, and the one-job slot.
 pub struct Brushes {
     gate: Arc<SingleFlight>,
+    /// Where the model is downloaded to; unread in a build with no model
+    /// to run.
+    #[cfg_attr(not(feature = "infer"), allow(dead_code))]
     data: PathBuf,
+    #[cfg(feature = "infer")]
     brush: Mutex<Option<Arc<Brush>>>,
     /// Frames read lately, by media and source millisecond.
+    #[cfg(feature = "infer")]
     embeddings: Mutex<VecDeque<Read>>,
 }
 
@@ -110,7 +129,9 @@ impl Brushes {
         Brushes {
             gate: Arc::new(SingleFlight::new()),
             data: data.to_path_buf(),
+            #[cfg(feature = "infer")]
             brush: Mutex::new(None),
+            #[cfg(feature = "infer")]
             embeddings: Mutex::new(VecDeque::new()),
         }
     }
@@ -125,6 +146,7 @@ impl Brushes {
         self.gate.cancel();
     }
 
+    #[cfg(feature = "infer")]
     fn brush(
         &self,
         cancel: &AtomicBool,
@@ -153,6 +175,7 @@ impl Brushes {
 
     /// The encoder's reading of `frame` at `millis` of `media`, from the
     /// recent few when it is there.
+    #[cfg(feature = "infer")]
     fn embed(
         &self,
         brush: &Brush,
@@ -181,9 +204,21 @@ impl Brushes {
         Ok(embedding)
     }
 
+    /// Reads the regions under `request`'s stroke: in a build without the
+    /// model, nothing to read them with, said as an error.
+    #[cfg(not(feature = "infer"))]
+    pub fn read(
+        &self,
+        _request: &RegionRequest,
+        _progress: &mut dyn FnMut(Progress),
+    ) -> Result<(), String> {
+        Err("the smart brush is not part of this build".to_owned())
+    }
+
     /// Reads the regions under `request`'s stroke, along the clip, and
     /// writes them. Blocks for the whole run, so run it on its own
     /// thread; `progress` is called as it goes.
+    #[cfg(feature = "infer")]
     pub fn read(
         &self,
         request: &RegionRequest,
@@ -353,6 +388,7 @@ fn missing(store: &MaskStore, ranges: &[(f64, f64)]) -> Vec<u64> {
 }
 
 /// The instants split into runs a step apart.
+#[cfg(feature = "infer")]
 fn runs(instants: &[u64], step: u64) -> Vec<Vec<u64>> {
     let mut out: Vec<Vec<u64>> = Vec::new();
     for &at in instants {

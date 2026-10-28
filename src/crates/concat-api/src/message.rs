@@ -158,6 +158,23 @@ pub enum Request {
         file: String,
     },
 
+    /// Downloads a file from the web into the project's folder and adds it
+    /// to the bin, as `media.import` does: a voice an online service read,
+    /// a song or a sound effect it made, a picture.
+    #[serde(rename = "media.fetch")]
+    MediaFetch {
+        /// The project folder.
+        path: String,
+        /// The file's address, http or https.
+        url: String,
+        /// Where to put it: a path inside the project's folder with the
+        /// file's extension, "episodes/ep02-ghost-ship/voice/narration.mp3".
+        /// When absent, `assets/` under the address's own file name. A
+        /// name already taken gets a number.
+        #[serde(default)]
+        name: Option<String>,
+    },
+
     /// Every effect package the build knows, with its parameters, so a
     /// caller can build a valid chain without reading a manifest.
     #[serde(rename = "catalogue.list")]

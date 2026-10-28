@@ -14,6 +14,7 @@ import { Select } from "../primitives/select.slint";
 import { PaneScroll } from "../workspace/pane.slint";
 import { HairlineSplitter } from "../workspace/splitter.slint";
 import { Editor } from "../editor.slint";
+import { Build } from "../build.slint";
 
 // Settings: a fixed-height sheet with a column of pages down the side. The
 // model rows keep two things apart — a downloaded model is a *choice* and so
@@ -712,14 +713,25 @@ export component SettingsDialog inherits Modal {
     property <bool> compact: root.width < 600px;
 
     /// Every page, in order; the column and the row of tabs are drawn from
-    /// the same list. `desk` is a page a phone does not show.
-    property <[{label: string, glyph: Glyph, page: int, desk: bool}]> page-list: [
+    /// the same list. `desk` is a page a phone does not show. A build with
+    /// no speech models to download has no Transcriber or Speech page.
+    property <[{label: string, glyph: Glyph, page: int, desk: bool}]> page-list:
+        Build.speech-ai ? root.every-page : root.pages-without-speech;
+    property <[{label: string, glyph: Glyph, page: int, desk: bool}]> every-page: [
         {label: I18n.t("settings.general"), glyph: Glyph.settings, page: 0, desk: false},
         {label: I18n.t("settings.appearance"), glyph: Glyph.sun, page: 1, desk: false},
         // The keys: a desk's, since a phone has no keyboard to bind.
         {label: I18n.t("settings.shortcuts"), glyph: Glyph.keyboard, page: 7, desk: true},
         {label: I18n.t("common.transcriber"), glyph: Glyph.waveform, page: 2, desk: false},
         {label: I18n.t("common.speech"), glyph: Glyph.music, page: 3, desk: false},
+        {label: I18n.t("settings.automation"), glyph: Glyph.lock, page: 4, desk: true},
+        {label: I18n.t("settings.version"), glyph: Glyph.tag, page: 6, desk: true},
+        {label: I18n.t("settings.about"), glyph: Glyph.sparkle, page: 5, desk: false},
+    ];
+    property <[{label: string, glyph: Glyph, page: int, desk: bool}]> pages-without-speech: [
+        {label: I18n.t("settings.general"), glyph: Glyph.settings, page: 0, desk: false},
+        {label: I18n.t("settings.appearance"), glyph: Glyph.sun, page: 1, desk: false},
+        {label: I18n.t("settings.shortcuts"), glyph: Glyph.keyboard, page: 7, desk: true},
         {label: I18n.t("settings.automation"), glyph: Glyph.lock, page: 4, desk: true},
         {label: I18n.t("settings.version"), glyph: Glyph.tag, page: 6, desk: true},
         {label: I18n.t("settings.about"), glyph: Glyph.sparkle, page: 5, desk: false},

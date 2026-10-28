@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jareer Abdullah and Concat contributors
+
+// What of the on-device AI this build carries, set once from Rust at
+// startup by the app's `speech` and `vision-ai` features.
+//
+// A build without them hides what they would have offered - Text to
+// speech, a clip's voice into captions, background removal and the smart
+// brushes - rather than showing buttons that could only say no. A global
+// of its own rather than two more on Editor, because the panes that read it
+// are among the files Editor imports its types from, and an import cannot
+// go both ways.
+export global Build {
+    /// whisper.cpp and the voices: captions from a clip's sound, Text to
+    /// speech. Recording a voiceover is neither, and is always there.
+    in-out property <bool> speech-ai: false;
+    /// ONNX Runtime: background removal and the smart brushes. Enhance
+    /// runs on our own shaders without it.
+    in-out property <bool> vision-ai: false;
+}

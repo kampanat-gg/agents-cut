@@ -574,6 +574,7 @@ pub(crate) fn crop(frame: &concat_core::Frame, width: u32, height: u32) -> conca
 /// where it mattered. Each candidate is warmed on one window and timed on
 /// the next two, in the app as it is, and both times are logged. ONNX
 /// Runtime on the CPU is what is left when no GPU opens.
+#[cfg(feature = "infer")]
 fn fastest(file: &Path) -> Result<Enhancer, String> {
     let gpu = on_gpu(file);
     // The CPU is never a contender: where only it would answer, our
@@ -612,8 +613,16 @@ fn fastest(file: &Path) -> Result<Enhancer, String> {
     }
 }
 
+/// The model on our own shaders, in a build without ONNX Runtime: there
+/// is nothing to race them against, and with no GPU nothing to run on.
+#[cfg(not(feature = "infer"))]
+fn fastest(file: &Path) -> Result<Enhancer, String> {
+    on_gpu(file).ok_or_else(|| "enhance: it needs a GPU, and none opened here".to_owned())
+}
+
 /// Seconds `enhancer` takes over one window once warm: the first run
 /// compiles and is not counted, the better of the next two is.
+#[cfg(feature = "infer")]
 fn window_seconds(enhancer: &Enhancer) -> f64 {
     let side = vision::WINDOW;
     let frame = Frame::black(side - 2 * vision::PAD, side - 2 * vision::PAD);
@@ -835,8 +844,10 @@ mod tests {
     /// the CPU elsewhere - give the same picture,
     /// tiles, margins and pasting included: a few levels at the worst pixel
     /// and well under one on average, the
-    /// GPU working in half floats. Needs the fetched model and a GPU.
+    /// GPU working in half floats. Needs the fetched model and a GPU, and
+    /// a build with ONNX Runtime in it.
     #[test]
+    #[cfg(feature = "infer")]
     fn the_gpu_enhances_as_onnx_runtime_does() {
         let Some(file) = ["org.standalones.concat", "app.concat.editor"]
             .iter()

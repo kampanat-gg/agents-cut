@@ -11,6 +11,9 @@ import { IconButton } from "primitives/panel.slint";
 export struct AgentStep {
     label: string,
     detail: string,
+    /// Who does it: "claude", "codex", "elevenlabs", or "" for the
+    /// editor's own work; see `Brand`.
+    brand: string,
     state: int,
     time: string,
     last: bool,
@@ -29,6 +32,8 @@ export struct AgentRow {
     steps: [AgentStep],
     open: bool,
     elapsed: string,
+    /// The brand of the step under way, for the header while it runs.
+    brand: string,
 }
 
 
@@ -67,14 +72,54 @@ export global Agent {
     in-out property <int> effort;
     callback model-picked(index: int);
     callback effort-picked(index: int);
-    /// The open project's style, for the strip above the box; empty for
-    /// none.
-    in-out property <string> style-name;
     /// The + button: files to attach. What they are called in the message
     /// comes back as `attached-text`, and `attached-token` moves each time.
     callback attach();
+    /// Words for the box from elsewhere in the window - a clip named by the
+    /// stage's bar - after what is typed there; they come back as
+    /// `attached-text` the way an attachment's do.
+    callback mention(words: string);
     in-out property <string> attached-text;
     in-out property <int> attached-token;
+}
+
+// Claude's mark: a burst of rays in clay, the face of the agent that
+// answers here.
+export component ClaudeMark inherits Image {
+    in property <length> size: 40px;
+
+    width: root.size;
+    height: root.size;
+    source: @image-url("logos/claude-color.svg");
+}
+
+/// The mark of who is doing a step - Claude, Codex, ElevenLabs - drawn
+/// beside it so the user sees which service is at work. One-colour marks
+/// take the text's colour; Claude's and Codex's keep their own.
+component Brand inherits Rectangle {
+    in property <string> brand;
+    in property <length> size: 14px;
+    in property <brush> tint: Theme.fg-muted;
+
+    width: root.brand == "" ? 0px : root.size;
+    height: root.size;
+
+    if root.brand == "claude": Image {
+        width: root.size;
+        height: root.size;
+        source: @image-url("logos/claude-color.svg");
+    }
+    if root.brand == "codex": Image {
+        width: root.size;
+        height: root.size;
+        source: @image-url("logos/codex-color.svg");
+    }
+    if root.brand == "elevenlabs": Image {
+        width: root.size;
+        height: root.size;
+        source: @image-url("logos/elevenlabs.svg");
+        colorize: root.tint;
+    }
 }
 
 // A small round button in the box's bottom row.
@@ -151,11 +196,7 @@ component Chooser inherits Rectangle {
                 // Default lights two; each level one more, max all four.
                 lit: root.current == 0 ? 2 : Math.min(4, root.current);
             }
-            if !root.bars: Icon {
-                glyph: Glyph.sparkle;
-                size: 13px;
-                tint: Theme.accent;
-            }
+            if !root.bars: ClaudeMark { size: 13px; }
         }
 
         Text {
@@ -294,6 +335,14 @@ component Steps inherits Rectangle {
                     }
                 }
 
+                if root.data.state == 0 && root.data.brand != "": VerticalLayout {
+                    alignment: center;
+                    Brand {
+                        brand: root.data.brand;
+                        tint: Theme.fg;
+                    }
+                }
+
                 Text {
                     horizontal-stretch: 1;
                     text: root.data.text;
@@ -357,6 +406,15 @@ component Steps inherits Rectangle {
                         }
                     }
 
+                    if step.brand != "": VerticalLayout {
+                        alignment: start;
+                        padding-top: 1px;
+                        Brand {
+                            brand: step.brand;
+                            tint: step.state == 0 ? Theme.fg : Theme.fg-muted;
+                        }
+                    }
+
                     VerticalLayout {
                         horizontal-stretch: 1;
                         spacing: 2px;
@@ -415,11 +473,13 @@ component Bubble inherits Rectangle {
 
             Rectangle {
                 max-width: root.mine ? root.width * 0.85 : root.width;
-                background: root.mine ? Theme.accent-soft
+                // What you said in a grey pill, as Claude's app has it; what
+                // the agent said on the ground itself.
+                background: root.mine ? Theme.sidebar-hover
                     : root.tool ? Theme.well
                     : root.problem ? Theme.danger-wash
                     : transparent;
-                border-radius: Theme.r;
+                border-radius: root.mine ? 14px : Theme.r;
                 border-width: root.problem ? 1px : 0px;
                 border-color: Theme.danger-edge;
 
@@ -450,7 +510,11 @@ component Bubble inherits Rectangle {
                                 : root.problem ? Theme.danger
                                 : root.tool ? Theme.fg-muted
                                 : Theme.fg;
+                            // One size for both sides of the conversation,
+                            // as Claude's app has it.
                             font-size: root.tool || root.note ? Theme.fs-sm : Theme.fs-lg;
+                            font-family: root.mine || root.tool || root.note || root.problem
+                                ? Theme.font : Theme.font-reading;
                             font-weight: root.tool ? Theme.weight-title : Theme.weight-body;
                             horizontal-alignment: root.note ? center : left;
                         }
@@ -471,8 +535,9 @@ component Bubble inherits Rectangle {
 // The open sidebar: a header, the conversation, and the box a request is
 // typed into. Return sends; Shift-Return is a new line.
 export component AgentSidebar inherits Rectangle {
-    background: Theme.panel;
-    border-radius: Theme.r-lg;
+    // Claude's own sidebar tone, as the title bar over it has: one column
+    // down the left, a blue-grey beside the neutral work.
+    background: Theme.sidebar;
     clip: true;
 
     /// Keeps the newest row in view while the user has not scrolled away.
@@ -497,53 +562,13 @@ export component AgentSidebar inherits Rectangle {
     // Placed by hand rather than in a column: a layout's maximum height
     // would cap the row the sidebar shares with the workspace.
 
-    // ── the header ──
+    // ── the conversation ──
+    // Its header is the title bar's left column: the switch that folds it
+    // and the button for a new conversation.
     Rectangle {
         y: 0;
         width: root.width;
-        height: 44px;
-
-        Rectangle {
-            y: parent.height - 1px;
-            height: 1px;
-            background: Theme.line;
-        }
-
-        HorizontalLayout {
-            padding-left: Theme.pad;
-            padding-right: 6px;
-            spacing: 2px;
-
-            Text {
-                text: I18n.t("agent.title");
-                color: Theme.fg;
-                font-size: Theme.fs-lg;
-                font-weight: Theme.weight-title;
-                vertical-alignment: center;
-            }
-
-            Rectangle { horizontal-stretch: 1; }
-
-            IconButton {
-                glyph: Glyph.plus;
-                label: I18n.t("agent.newChat");
-                enabled: Agent.rows.length > 0;
-                clicked => { Agent.new-chat(); }
-            }
-
-            IconButton {
-                glyph: Glyph.chevron-left;
-                label: I18n.t("agent.hide");
-                clicked => { Agent.shown-changed(false); }
-            }
-        }
-    }
-
-    // ── the conversation ──
-    Rectangle {
-        y: 44px;
-        width: root.width;
-        height: root.height - 44px - box.height;
+        height: root.height - box.height;
 
         flick := Flickable {
             content-height: root.content-h + 16px;
@@ -576,17 +601,14 @@ export component AgentSidebar inherits Rectangle {
             padding: 24px;
             spacing: 8px;
 
-            Text {
-                text: I18n.t("agent.emptyTitle");
-                color: Theme.fg;
-                font-size: Theme.fs-xl;
-                font-weight: Theme.weight-title;
-                horizontal-alignment: center;
-                wrap: word-wrap;
+            HorizontalLayout {
+                alignment: center;
+                padding-bottom: 6px;
+                ClaudeMark { size: 44px; }
             }
 
             Text {
-                text: I18n.t("agent.emptyBody");
+                text: I18n.t("agent.emptyPrompt");
                 color: Theme.fg-muted;
                 font-size: Theme.fs;
                 horizontal-alignment: center;
@@ -603,7 +625,9 @@ export component AgentSidebar inherits Rectangle {
 
             for starter in Agent.starters: Rectangle {
                 height: 34px;
-                background: chip.has-hover ? Theme.field-hover : Theme.field;
+                // Flat, edged, lit on hover: the way Claude's sidebar rows
+                // and its cards are drawn, not raised chips.
+                background: chip.has-hover ? Theme.sidebar-hover : transparent;
                 border-radius: Theme.r;
                 border-width: 1px;
                 border-color: Theme.line;
@@ -639,53 +663,17 @@ export component AgentSidebar inherits Rectangle {
     // A card: the words on top, growing with them, and a row under them of
     // what to send with them - files, the model, the effort - and Send.
     box := Rectangle {
-        property <length> strip: Agent.style-name != "" ? 26px : 0px;
         property <length> words: Math.min(132px, Math.max(22px, draft.preferred-height));
 
         y: root.height - self.height;
         width: root.width;
-        height: self.strip + self.words + 42px + 38px;
-
-        // The project's style, in a strip the card sits on.
-        if Agent.style-name != "": Rectangle {
-            x: 10px;
-            y: 6px;
-            width: parent.width - 20px;
-            height: 40px;
-            background: Theme.well;
-            border-radius: 14px;
-
-            HorizontalLayout {
-                padding-left: 12px;
-                padding-right: 12px;
-                height: 24px;
-                spacing: 6px;
-
-                VerticalLayout {
-                    alignment: center;
-                    Icon {
-                        glyph: Glyph.sparkle;
-                        size: 11px;
-                        tint: Theme.accent;
-                    }
-                }
-
-                Text {
-                    horizontal-stretch: 1;
-                    text: Agent.style-name;
-                    color: Theme.fg-muted;
-                    font-size: Theme.fs-sm;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
-            }
-        }
+        height: self.words + 42px + 38px;
 
         Rectangle {
             x: 10px;
-            y: parent.strip + 6px;
+            y: 6px;
             width: parent.width - 20px;
-            height: parent.height - parent.strip - 22px;
+            height: parent.height - 22px;
             background: Theme.field;
             border-radius: 14px;
             border-width: 1px;
@@ -780,8 +768,7 @@ export component AgentSidebar inherits Rectangle {
 
 // The closed sidebar: a strip at the edge with the button that opens it.
 export component AgentRail inherits Rectangle {
-    background: Theme.panel;
-    border-radius: Theme.r-lg;
+    background: Theme.sidebar;
 
     VerticalLayout {
         padding-top: 9px;

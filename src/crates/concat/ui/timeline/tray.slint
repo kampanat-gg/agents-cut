@@ -8,6 +8,7 @@ import { IconButton } from "../primitives/panel.slint";
 import { LevelMeter } from "../primitives/level-meter.slint";
 import { TimelineTool } from "model.slint";
 import { Editor } from "../editor.slint";
+import { Build } from "../build.slint";
 
 // The timeline's tool tray.
 //
@@ -413,7 +414,10 @@ export component TimelineTray inherits Rectangle {
             checked: Editor.captions-open;
             clicked => { root.captions(); }
         }
-        TrayButton {
+        // Text to speech is the voices' alone, so a build without them has
+        // no button for it. Captions stay: a typed script and a SubRip
+        // file need no model.
+        if Build.speech-ai: TrayButton {
             glyph: Glyph.volume;
             label: I18n.t("tray.textToSpeech");
             icon-size: 16px;

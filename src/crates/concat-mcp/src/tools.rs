@@ -255,6 +255,13 @@ pub fn catalogue() -> Vec<Tool> {
         )
         .idempotent(),
         method(
+            "media_fetch",
+            "Fetch media from the web",
+            "Downloads a file from an http or https address into the project's folder and adds it to the bin: the way in for anything an online service makes - a voice ElevenLabs read, a song or a sound effect, a picture. `name` is where to put it, a path inside the project with the extension (\"episodes/ep02-ghost-ship/voice/narration.mp3\"); without it the file lands in `assets/`. A name already taken gets a number. The new item's id is the summary's `createdId`; place it with `clip_add`.",
+            "media.fetch",
+            Summary,
+        ),
+        method(
             "edit_apply",
             "Apply an edit",
             "Applies any one edit command to an open project, as one undoable step. `command` is an object tagged by `op` - every edit the window can make is one, with the same limits and refusals; the typed tools below are the common ones. `{\"op\": \"batch\", \"commands\": [...]}` applies several commands as one atomic, undoable step: all land or none does, and `createdId` is the last id minted inside. A refusal comes back as the sentence the window would show, with nothing changed. Returns the project summary; a command that creates something puts its id in `createdId`.",
@@ -991,6 +998,10 @@ mod tests {
             (
                 "media_import",
                 json!({ "path": "/tmp/Cut", "file": "/tmp/a.mp4" }),
+            ),
+            (
+                "media_fetch",
+                json!({ "path": "/tmp/Cut", "url": "https://example.com/a.mp3", "name": "voice.mp3" }),
             ),
             (
                 "edit_apply",

@@ -25,7 +25,7 @@ use slint::{Model, VecModel};
 use crate::host::Shell;
 use crate::i18n::tf;
 use crate::studio::Studio;
-use crate::ui::FileRow;
+use crate::ui::{FileRow, VideoCard};
 
 /// How often the open project's folder is read again.
 const EVERY: Duration = Duration::from_secs(2);
@@ -98,6 +98,8 @@ struct Entry {
 
 pub struct Files {
     rows: Rc<VecModel<FileRow>>,
+    /// The project's videos, one a timeline: the side panel's cards.
+    videos: Rc<VecModel<VideoCard>>,
     folder: Option<PathBuf>,
     listed: Vec<Entry>,
     /// Folders listed open, and every folder seen, so one that appears
@@ -120,6 +122,7 @@ impl Default for Files {
     fn default() -> Self {
         Files {
             rows: Rc::new(VecModel::default()),
+            videos: Rc::new(VecModel::default()),
             folder: None,
             listed: Vec::new(),
             open: HashSet::new(),
@@ -139,10 +142,16 @@ impl Files {
         Rc::clone(&self.rows)
     }
 
+    /// The video cards, handed to the side panel once.
+    pub fn videos(&self) -> Rc<VecModel<VideoCard>> {
+        Rc::clone(&self.videos)
+    }
+
     /// Lists the project at `folder`, and keeps listing it.
     pub fn load(&mut self, folder: &Path) {
         *self = Files {
             rows: Rc::clone(&self.rows),
+            videos: Rc::clone(&self.videos),
             folder: Some(folder.to_path_buf()),
             ..Files::default()
         };
@@ -382,6 +391,16 @@ fn children(dir: &Path, top: bool) -> Vec<(String, PathBuf, bool)> {
     found
 }
 
+/// A frame rate as people write it: "24", "29.97".
+fn rate(fps: f64) -> String {
+    let rounded = (fps * 100.0).round() / 100.0;
+    if rounded.fract() == 0.0 {
+        format!("{rounded:.0}")
+    } else {
+        format!("{rounded}")
+    }
+}
+
 /// A picture made small, or None for one that does not read.
 fn thumbnail(path: &Path) -> Option<slint::SharedPixelBuffer<slint::Rgba8Pixel>> {
     let small = image::open(path).ok()?.thumbnail(THUMB, THUMB).into_rgba8();
@@ -393,6 +412,47 @@ fn thumbnail(path: &Path) -> Option<slint::SharedPixelBuffer<slint::Rgba8Pixel>>
 }
 
 impl Studio {
+    /// The side panel's cards: each timeline, with the picture of the
+    /// earliest clip on it that has one - the bin's own thumbnail of its
+    /// file, made for the bin whether it is on screen or not.
+    pub fn publish_videos(&self) {
+        let project = self.project();
+        let cards: Vec<VideoCard> = project
+            .timelines
+            .iter()
+            .map(|timeline| {
+                let thumb = timeline
+                    .clips
+                    .iter()
+                    .filter(|clip| {
+                        matches!(
+                            clip.kind,
+                            concat_project::model::ClipKind::Video
+                                | concat_project::model::ClipKind::Image
+                        )
+                    })
+                    .min_by(|a, b| a.start.total_cmp(&b.start))
+                    .and_then(|clip| self.media.thumbs.get(&clip.media_id).cloned());
+                VideoCard {
+                    name: timeline.name.as_str().into(),
+                    seconds: timeline.duration() as f32,
+                    frame: format!(
+                        "{} × {} · {} fps",
+                        timeline.video.width,
+                        timeline.video.height,
+                        rate(timeline.video.rate())
+                    )
+                    .into(),
+                    aspect: timeline.video.width as f32 / timeline.video.height.max(1) as f32,
+                    thumbed: thumb.is_some(),
+                    thumb: thumb.unwrap_or_default(),
+                    current: timeline.id == project.active_timeline_id,
+                }
+            })
+            .collect();
+        crate::studio::sync(&self.files.videos, cards);
+    }
+
     /// A file of the project's laid on the timeline: onto `track_id` at
     /// `start`, or at `start` on the first lane with room. It joins the
     /// bin first if it is not in it.
@@ -518,6 +578,12 @@ mod tests {
         );
         assert_eq!(files.full("../two/a.png"), None);
         assert_eq!(files.full("/etc/hosts"), None);
+    }
+
+    #[test]
+    fn a_rate_reads_as_people_write_it() {
+        assert_eq!(rate(24.0), "24");
+        assert_eq!(rate(30000.0 / 1001.0), "29.97");
     }
 
     #[test]

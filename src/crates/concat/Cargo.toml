@@ -17,6 +17,19 @@ path = "src/lib.rs"
 name = "concat"
 path = "src/main.rs"
 
+# The on-device AI, off by default: whisper.cpp, sherpa-onnx and ONNX
+# Runtime are most of what a build of the window weighs. A build without
+# them hides what they would have offered rather than showing buttons that
+# only say no; see the Editor global's `speech-ai` and `vision-ai`.
+[features]
+default = []
+# Captions from speech (whisper.cpp) and narration (Kokoro, Pocket TTS and
+# Chatterbox). Recording a voiceover is not this; it is always there.
+speech = ["concat-speech/whisper", "concat-speech/voices", "concat-speech/chatterbox"]
+# Background removal and the smart brushes, through ONNX Runtime. Enhance
+# runs on our own shaders without it.
+vision-ai = ["concat-host/infer"]
+
 # Native Wayland file drops; see wayland_drop.rs. winit 0.30 reports a
 # dropped file on X11 and not on Wayland, so the window listens for one
 # itself on the display winit opened. The same two crates winit draws
@@ -31,6 +44,10 @@ libc = "0.2"
 # `leave` in lib.rs.
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"
+# The traffic lights, moved down into the taller title bar the window draws
+# (`platform::place_traffic_lights`). The versions winit itself is built on.
+objc2-app-kit = { version = "0.2.2", features = ["NSButton", "NSControl", "NSResponder", "NSView", "NSWindow"] }
+objc2-foundation = { version = "0.2.2", features = ["NSGeometry"] }
 
 [dependencies]
 # Where the desktop really is: Windows' known folder, which OneDrive may
@@ -91,7 +108,7 @@ concat-media.workspace = true
 concat-project.workspace = true
 concat-export.workspace = true
 concat-host = { workspace = true, features = ["gpu"] }
-concat-speech = { workspace = true, features = ["chatterbox"] }
+concat-speech.workspace = true
 # The Settings sheet's Automation page: the Concat API on a socket while the
 # window is open. JSON-RPC only; the gRPC feature stays with concat-cli.
 concat-server.workspace = true

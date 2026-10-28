@@ -511,6 +511,7 @@ impl Api {
             | Request::EditUndo { path }
             | Request::EditRedo { path }
             | Request::MediaImport { path, .. }
+            | Request::MediaFetch { path, .. }
             | Request::TemplateSave { path, .. }
             | Request::ExportRun { path, .. }
             | Request::PreviewFrame { path, .. } => path,
@@ -567,6 +568,13 @@ impl Api {
                     .to_new_media();
                 view(window.run(path, LiveCall::Apply(Box::new(Command::AddMedia { item })))?)
             }
+            Request::MediaFetch { url, name, .. } => {
+                let file = fetch(path, &url, name.as_deref())?;
+                let item = media::probe(&file)
+                    .map_err(ApiError::failed)?
+                    .to_new_media();
+                view(window.run(path, LiveCall::Apply(Box::new(Command::AddMedia { item })))?)
+            }
             // Readers of the whole edit: run here on a copy of it, held as
             // a session just for the call.
             request => {
@@ -615,6 +623,10 @@ impl Api {
                 Ok(Reply::Media(media::probe(&path).map_err(ApiError::failed)?))
             }
             Request::MediaImport { path, file } => view(self.import(&path, &file)?),
+            Request::MediaFetch { path, url, name } => {
+                let file = fetch(&path, &url, name.as_deref())?;
+                view(self.import(&path, &file)?)
+            }
             Request::CatalogueList { kind } => Ok(Reply::Packages(catalogue(kind.as_deref())?)),
             Request::TemplateList => Ok(Reply::Templates(templates::list(&self.dirs.config))),
             Request::TemplateInstantiate {
@@ -875,10 +887,12 @@ impl Api {
 
         let project_path = session.path().to_owned();
         let project_dir = PathBuf::from(&project_path);
+        // A build that cannot find masks renders with the ones on disk,
+        // as the window's own export does, rather than failing over them.
         let masks: Vec<(String, AnalyseRequest)> =
             Cutouts::requests(session.project(), &project_dir)
                 .into_iter()
-                .filter(|(_, request)| Cutouts::outstanding(request) != 0)
+                .filter(|(_, request)| Cutouts::can_analyse() && Cutouts::outstanding(request) != 0)
                 .collect();
         let steadies: Vec<(String, StabilizeRequest)> =
             Stabilizers::requests(session.project(), &project_dir)
@@ -1338,9 +1352,93 @@ fn encode_png(
     writer.finish()
 }
 
+/// [`Request::MediaFetch`]'s download: `url` into the project, at `name`,
+/// a path inside the project's folder such as
+/// "episodes/ep02/voice/take.mp3", or in `assets` under the last part of
+/// the address; a number is added when the name is taken. The file's path.
+fn fetch(project: &str, url: &str, name: Option<&str>) -> Result<String, ApiError> {
+    let wanted = match name {
+        Some(name) => PathBuf::from(name),
+        None => Path::new("assets").join(
+            url.split(['?', '#'])
+                .next()
+                .and_then(|address| address.rsplit('/').next())
+                .filter(|last| !last.is_empty())
+                .unwrap_or("download"),
+        ),
+    };
+    let file = inside(project, &wanted).ok_or_else(|| {
+        ApiError::failed(format!(
+            "{} is not a place in the project",
+            wanted.display()
+        ))
+    })?;
+    let folder = file.parent().unwrap_or(Path::new(project)).to_path_buf();
+    std::fs::create_dir_all(&folder).map_err(|error| {
+        ApiError::failed(format!("could not make {}: {error}", folder.display()))
+    })?;
+    let stem = file
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let extension = file
+        .extension()
+        .map(|extension| format!(".{}", extension.to_string_lossy()))
+        .unwrap_or_default();
+    let mut target = file.clone();
+    let mut n = 2;
+    while target.exists() {
+        target = folder.join(format!("{stem} {n}{extension}"));
+        n += 1;
+    }
+    concat_host::net::download(url, &target).map_err(ApiError::failed)?;
+    Ok(target.to_string_lossy().into_owned())
+}
+
+/// `relative` as a file in the project's folder: plain names only, so
+/// nothing lands above the folder, in a hidden one, or in the editor's
+/// own `cache`.
+fn inside(project: &str, relative: &Path) -> Option<PathBuf> {
+    use std::path::Component;
+
+    let mut parts = Vec::new();
+    for part in relative.components() {
+        let Component::Normal(part) = part else {
+            return None;
+        };
+        let part = part.to_str()?;
+        if part.starts_with('.') {
+            return None;
+        }
+        parts.push(part);
+    }
+    if parts.is_empty() || parts[0] == "cache" {
+        return None;
+    }
+    Some(
+        parts
+            .iter()
+            .fold(PathBuf::from(project), |path, part| path.join(part)),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fetched_file_lands_inside_the_project() {
+        let at = |path: &str| inside("/p", Path::new(path));
+        assert_eq!(
+            at("episodes/ep02/voice/take.mp3"),
+            Some(PathBuf::from("/p/episodes/ep02/voice/take.mp3"))
+        );
+        assert_eq!(at("song.mp3"), Some(PathBuf::from("/p/song.mp3")));
+        assert_eq!(at("../elsewhere.mp3"), None);
+        assert_eq!(at("/etc/hosts"), None);
+        assert_eq!(at(".hidden/a.mp3"), None);
+        assert_eq!(at("cache/a.mp3"), None);
+    }
     use concat_project::commands::NewMedia;
     use concat_project::model::MediaKind;
     use serde_json::json;

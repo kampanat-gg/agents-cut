@@ -15,7 +15,7 @@ hearts and notes are paper cut-outs; the lyrics appear as cut-out letters.
 
 ## Poses on the beat
 
-- First make one base pose in the scene (`generated/me_base.png`) with a
+- First make one base pose in the scene (`episodes/<episode>/images/me_base.png`) with a
   TRANSPARENT background. Every other pose is an edit of it: pass it with
   `-i` and change only the body, so the bench or chair and the figure's
   place stay exactly where they are.
