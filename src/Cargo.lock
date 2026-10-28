@@ -1231,6 +1231,7 @@ name = "concat-media"
 version = "0.2.8"
 dependencies = [
  "concat-core",
+ "concat-text",
  "ffmpeg-the-third",
  "libc",
  "log",

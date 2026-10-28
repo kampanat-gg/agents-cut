@@ -177,34 +177,60 @@ or backticks; use short lines and a "-" for a list.
 Not every picture should be drawn. A video that cuts between drawn
 scenes and graphics you write yourself never sits still, and the
 graphics are instant, free and exact. Use one wherever the narration
-explains: a map with pins and a route, a timeline of dates, a big number,
-a comparison of sizes, a diagram (the sea's depth, how something works),
-a list of two to four points, a quote card.
+explains: a map with pins and a route, a timeline of dates, a number
+counting up, bars or sizes compared, a diagram (the sea's depth, how
+something works), a list of two to four points, a quote card.
 
-- Write each as an SVG file with Write, in
-  `episodes/<episode>/graphics/<name>.svg`, then `media_import` it and
-  place it. The editor draws SVG sharp at any size.
-- Give every SVG the frame's own size as its viewBox (`0 0 1080 1920` for
-  9:16) and no background unless it is the base, so layers line up
-  exactly when placed full-frame.
-- Build a graphic as layers, like a drawn scene: the base (the map, the
-  axis, the backdrop) as one SVG, and each thing that arrives - a pin, a
-  route, a bar, an arrow - as its own SVG over it. Bring each in with
-  keyframes: a pin pops (scale 0 to 1.1 to 1), a bar grows from its foot,
-  a route wipes in from its start (a `concat.linear-wipe` at its head), the base pushes in slowly.
-- Put words on graphics as titles on the timeline, not as SVG text: titles
-  are set in the channel's fonts, Thai included; SVG text gets whatever
-  the machine has.
+Write them as code clips: an SVG whose numbers can be `{{ expressions }}`
+of the time. The editor draws it once a frame into a clip that moves, so
+a number counts, a bar grows, a route draws itself on.
+
+```
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1920" data-duration="3">
+  <rect x="140" y="{{ 1400 - 900 * ease(between(t, 0.2, 1.4)) }}" width="240"
+        height="{{ 900 * ease(between(t, 0.2, 1.4)) }}" fill="#E4572E"/>
+  <text x="540" y="700" text-anchor="middle" font-family="Kanit" font-weight="700"
+        font-size="200" fill="#fff">{{ num(ease(p) * 12500) }}</text>
+  <path d="M 200 1600 C 400 1300, 700 1700, 900 1400" fill="none" stroke="#fff"
+        stroke-width="12" stroke-dasharray="1000"
+        stroke-dashoffset="{{ 1000 * (1 - ease(between(t, 1, 2.5))) }}"/>
+  <circle cx="900" cy="1400" r="{{ 30 * pop(between(t, 2.4, 2.8)) }}" fill="#fff"/>
+</svg>
+```
+
+- In `{{ }}`: `t` seconds since the clip began, `d` its length, `p` = t/d
+  from 0 to 1; `+ - * / %`, comparisons and `cond ? a : b`; `ease(x)`,
+  `ease_in`, `ease_out`, `pop(x)` (overshoots, then settles),
+  `between(t, a, b)` (0 before a, 1 after b), `clamp`, `lerp(a, b, x)`,
+  `min`, `max`, `abs`, `sqrt`, `pow`, `sin`, `cos`, `floor`, `ceil`,
+  `round(x, places)`, and `num(x, places)` for a number with its
+  thousands grouped. Stagger things with `between`: each arrives in its
+  own second.
+- On the `<svg>`: `data-duration` is the clip's length in seconds (4 when
+  left out), `data-fps` its frames a second (30). Place it for that long.
+- Write it with Write in `episodes/<episode>/graphics/<name>.svg`, then
+  `media_import` and place it. A hole that does not read fails the
+  import with its line and why: fix the file and import it again. To
+  change a clip, change its file; the editor draws it again. A new
+  `data-duration` needs the file imported again.
+- Give it the frame's own size as its viewBox (`0 0 1080 1920` for 9:16).
+  Leave the background out to lay it over a picture, or paint one to
+  stand on its own.
+- `font-family="Kanit"` sets numbers and labels in the captions' face,
+  Thai included; any face titles offer works too.
+- An SVG with no `{{ }}` is a still: place it and move it with keyframes.
 - Draw in the channel's colours (its `CLAUDE.md`, `brand/`): flat shapes,
   two or three colours, thick strokes that read on a phone.
 - Maps are real geography, never drawn by Codex. Fetch a public-domain
   equirectangular map (Natural Earth, Wikimedia Commons) once with
   `media_fetch` into `library/maps/` and reuse it. On an equirectangular
   map W wide and H high, a place at longitude `lon`, latitude `lat` is at
-  x = (lon + 180) / 360 * W, y = (90 - lat) / 180 * H: put pins and
-  routes in an overlay SVG with the map's own viewBox, and move and zoom
-  the map and its overlay together.
-- Look at the result with `preview_frame` and fix what is off.
+  x = (lon + 180) / 360 * W, y = (90 - lat) / 180 * H. Put the map in a
+  code clip with `<image href="../../../library/maps/world.svg">` (paths
+  are from the clip's own folder) and draw the pins and routes over it.
+  To pan or zoom, give the `<svg>` a fixed `width="1080" height="1920"`
+  and make its viewBox an expression.
+- Look at a few frames with `preview_frame` and fix what is off.
 
 ## Asking the user
 

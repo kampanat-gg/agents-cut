@@ -364,6 +364,15 @@ pub const BASE_FONTS: [&[u8]; 42] = [
     include_bytes!("../fonts/Kanit-Bold.ttf"),
 ];
 
+/// Every face this build carries: the bundled one, the base fonts and the
+/// script fallbacks. For an SVG to name one (concat-media's svg.rs).
+pub fn bundled_faces() -> impl Iterator<Item = &'static [u8]> {
+    BUNDLED
+        .into_iter()
+        .chain(BASE_FONTS)
+        .chain(SCRIPT_FALLBACKS)
+}
+
 /// The face captions are set in: Kanit, a loopless Thai face with Latin
 /// to match, the one most Thai short-video captions use. Bold Thai and
 /// bold Latin in one face, where Hanken Grotesk left Thai to a thin
