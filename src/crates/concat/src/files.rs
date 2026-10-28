@@ -550,7 +550,14 @@ impl Studio {
                     .min_by(|a, b| a.start.total_cmp(&b.start))
                     .and_then(|clip| self.media.thumbs.get(&clip.media_id).cloned());
                 let (folder, brief) = self.files.episode(&timeline.name);
+                let boarded = match (&folder, self.files.folder.as_ref()) {
+                    (Some(folder), Some(project)) => {
+                        project.join(folder).join("storyboard.md").is_file()
+                    }
+                    _ => false,
+                };
                 VideoCard {
+                    boarded,
                     folder: folder.unwrap_or_default().into(),
                     synopsis: brief.synopsis.into(),
                     status: brief.status.into(),

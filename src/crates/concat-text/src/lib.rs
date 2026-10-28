@@ -316,9 +316,10 @@ const BUNDLED: [&[u8]; 5] = [
 /// under the SIL Open Font License, Permanent Marker under Apache 2.0; the licences are beside the files in fonts/. Pixelify
 /// Sans and Google Sans Code are variable fonts, drawn at their default
 /// (regular) weight: fontdb sets no variation axes. Secular One and Rubik
-/// Scribble carry Hebrew. The window registers the
+/// Scribble carry Hebrew; Kanit carries Thai, at the weights captions are
+/// set in. The window registers the
 /// same bytes for its preset cards (concat's fonts.rs).
-pub const BASE_FONTS: [&[u8]; 40] = [
+pub const BASE_FONTS: [&[u8]; 42] = [
     include_bytes!("../fonts/Inter-Regular.ttf"),
     include_bytes!("../fonts/Inter-SemiBold.ttf"),
     include_bytes!("../fonts/Inter-Bold.ttf"),
@@ -359,7 +360,15 @@ pub const BASE_FONTS: [&[u8]; 40] = [
     include_bytes!("../fonts/EmilysCandy-Regular.ttf"),
     include_bytes!("../fonts/MysteryQuest-Regular.ttf"),
     include_bytes!("../fonts/ZenTokyoZoo-Regular.ttf"),
+    include_bytes!("../fonts/Kanit-SemiBold.ttf"),
+    include_bytes!("../fonts/Kanit-Bold.ttf"),
 ];
+
+/// The face captions are set in: Kanit, a loopless Thai face with Latin
+/// to match, the one most Thai short-video captions use. Bold Thai and
+/// bold Latin in one face, where Hanken Grotesk left Thai to a thin
+/// fallback.
+pub const CAPTION_FAMILY: &str = "Kanit";
 
 /// Noto Sans Thai 2.002, the loopless face Thai interfaces are set in.
 /// From https://github.com/notofonts/thai/releases/download/NotoSansThai-v2.002/NotoSansThai-v2.002.zip
@@ -2794,6 +2803,24 @@ mod tests {
     /// The bundled face answers by name at every weight the interface uses,
     /// upright and italic, and a document that names a retired face gets it
     /// too rather than whatever the system has.
+    /// Captions name Kanit: a face of its own at both its weights, not a
+    /// name that falls back to the bundled one.
+    #[test]
+    fn the_caption_face_is_kanit_at_its_two_weights() {
+        let fonts = Fonts::new();
+        assert!(fonts.families().iter().any(|name| name == CAPTION_FAMILY));
+        let style = |family: &str, weight: f64| TitleStyle {
+            font_family: family.to_owned(),
+            font_weight: weight,
+            ..style("ปลาทู")
+        };
+        let semibold = fonts.pick(&style(CAPTION_FAMILY, 600.0)).expect("600");
+        let bold = fonts.pick(&style(CAPTION_FAMILY, 700.0)).expect("700");
+        assert_ne!(semibold, bold);
+        let bundled = fonts.pick(&style(BUNDLED_FAMILY, 600.0)).expect("bundled");
+        assert_ne!(semibold, bundled);
+    }
+
     #[test]
     fn the_bundled_face_is_always_there_and_the_retired_names_reach_it() {
         let fonts = Fonts::new();

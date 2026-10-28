@@ -714,11 +714,15 @@ fn caption_clip(
             runs: Vec::new(),
             ..base.clone()
         },
+        // Kanit, bold, with a thin dark outline over the shadow: legible
+        // in Thai and Latin over any picture.
         None => TextStyle {
             content: text,
-            font_family: "Hanken Grotesk".to_owned(),
+            font_family: concat_text::CAPTION_FAMILY.to_owned(),
             font_size,
             font_weight: 600.0,
+            stroke_width: 0.004,
+            stroke_color: "#000000".to_owned(),
             ..TextStyle::default()
         },
     };

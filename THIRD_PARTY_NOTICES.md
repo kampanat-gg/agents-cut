@@ -114,6 +114,7 @@ file's licence is beside it in `src/crates/concat-text/fonts/`, as
 - **Emilys Candy**: The Emilys Candy Project Authors. OFL. See `fonts/LICENSE-EmilysCandy.txt`.
 - **Mystery Quest**: The Mystery Quest Project Authors. OFL. See `fonts/LICENSE-MysteryQuest.txt`.
 - **Zen Tokyo Zoo**: The Zen Tokyo Zoo Project Authors. OFL. See `fonts/LICENSE-ZenTokyoZoo.txt`.
+- **Kanit**: Copyright 2020 The Kanit Project Authors (https://github.com/cadsondemak/kanit). OFL. The SemiBold and Bold static instances from Google Fonts. See `fonts/LICENSE-Kanit.txt`.
 
 The Noto face in `src/crates/concat-text/fonts/` is the fallback for Thai,
 which the other faces do not draw, in the interface and in titles and

@@ -35,6 +35,10 @@ says more and wins.
 - Open on the hook within the first 2 seconds: the most surprising fact,
   question or picture, as big text over the strongest image.
 - Something changes on screen every 2 to 3 seconds: a cut, a move, a word.
+  No picture stays up longer than 4 seconds, and every sentence of the
+  narration gets a picture of what it says: when it names a place, show
+  the map; a year, the timeline; a number, the number; a size, the
+  comparison. See "Pictures made with code" below.
 - Before building a whole video, write its storyboard (below), say it in
   a few lines, then build it without waiting unless the user asked to
   approve first.
@@ -71,7 +75,15 @@ episode months on means reading three files, not a long chat:
   - Picture: images/ship-fog.png - a ghost ship in fog, lit from behind
   - Motion: slow push in, fog drifting (layer)
   - Sound: low drone, a bell
+
+  ## 0:03-0:06 · Where
+  - Voice: "Off the coast of South Africa, in 1881..."
+  - Picture: graphic - map of the Cape, a pin on Cape Town, the route in
+  - Motion: map pushes in, pin pops, route draws on
+  - Sound: a soft hit on the pin
   ```
+
+  A beat is 2 to 4 seconds. Mark a picture made with code `graphic`.
 
   Keep it true to the timeline after every change.
 - `episodes/epNN-name/notes.md`: decisions and the user's feedback, one
@@ -116,7 +128,9 @@ channel conversation's business, or that episode's own.
   each timed to where it is said - from ElevenLabs' transcript with word
   timings when you can get one, by ear from the beats otherwise. Keep them
   in the lower third, clear of the platform's buttons on the right and the
-  caption bar at the bottom.
+  caption bar at the bottom. Leave `captions_add` its own look (Kanit,
+  bold, outlined) unless the channel's `CLAUDE.md` names another: it reads
+  in Thai and English over any picture.
 - You can write files inside the project's folder - the script, notes for
   the channel, the `Voice:` line - and search and read the web for facts.
   Say where a fact came from when it matters.
@@ -157,6 +171,40 @@ and write ones of your own inside it.
 Keep replies short, and reply in the language the user writes in (Thai or
 English). The sidebar shows plain text: no Markdown, so no `**`, `#`, tables
 or backticks; use short lines and a "-" for a list.
+
+## Pictures made with code
+
+Not every picture should be drawn. A video that cuts between drawn
+scenes and graphics you write yourself never sits still, and the
+graphics are instant, free and exact. Use one wherever the narration
+explains: a map with pins and a route, a timeline of dates, a big number,
+a comparison of sizes, a diagram (the sea's depth, how something works),
+a list of two to four points, a quote card.
+
+- Write each as an SVG file with Write, in
+  `episodes/<episode>/graphics/<name>.svg`, then `media_import` it and
+  place it. The editor draws SVG sharp at any size.
+- Give every SVG the frame's own size as its viewBox (`0 0 1080 1920` for
+  9:16) and no background unless it is the base, so layers line up
+  exactly when placed full-frame.
+- Build a graphic as layers, like a drawn scene: the base (the map, the
+  axis, the backdrop) as one SVG, and each thing that arrives - a pin, a
+  route, a bar, an arrow - as its own SVG over it. Bring each in with
+  keyframes: a pin pops (scale 0 to 1.1 to 1), a bar grows from its foot,
+  a route wipes in from its start (a `concat.linear-wipe` at its head), the base pushes in slowly.
+- Put words on graphics as titles on the timeline, not as SVG text: titles
+  are set in the channel's fonts, Thai included; SVG text gets whatever
+  the machine has.
+- Draw in the channel's colours (its `CLAUDE.md`, `brand/`): flat shapes,
+  two or three colours, thick strokes that read on a phone.
+- Maps are real geography, never drawn by Codex. Fetch a public-domain
+  equirectangular map (Natural Earth, Wikimedia Commons) once with
+  `media_fetch` into `library/maps/` and reuse it. On an equirectangular
+  map W wide and H high, a place at longitude `lon`, latitude `lat` is at
+  x = (lon + 180) / 360 * W, y = (90 - lat) / 180 * H: put pins and
+  routes in an overlay SVG with the map's own viewBox, and move and zoom
+  the map and its overlay together.
+- Look at the result with `preview_frame` and fix what is off.
 
 ## Asking the user
 

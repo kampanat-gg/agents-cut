@@ -391,7 +391,7 @@ pub fn catalogue() -> Vec<Tool> {
         Tool {
             name: "captions_add",
             title: "Add captions",
-            description: "Places a run of captions in one undoable step: one title per entry, from `start` to `end` seconds, each on a lane above the picture. `style` applies to all of them (its `content` is ignored); without one they look like the window's captions - Hanken Grotesk, weight 600, 0.04 of the frame high. `offsetY` is where they sit, as a fraction of frame height from the centre: 0.35 (the default) is near the bottom, 0 the middle, -0.35 the top.",
+            description: "Places a run of captions in one undoable step: one title per entry, from `start` to `end` seconds, each on a lane above the picture. `style` applies to all of them (its `content` is ignored); without one they look like the window's captions - Kanit, weight 600, 0.045 of the frame high, with a thin black outline: legible in Thai and Latin. `offsetY` is where they sit, as a fraction of frame height from the centre: 0.35 (the default) is near the bottom, 0 the middle, -0.35 the top.",
             read_only: false,
             destructive: false,
             idempotent: false,
@@ -799,10 +799,13 @@ fn captions(mut arguments: Value) -> Result<Request, ApiError> {
             .ok_or_else(|| invalid("`offsetY` is a number"))?,
     };
     let style = match fields.remove("style") {
+        // The window's captions' look (concat's panes/captions.rs).
         None | Some(Value::Null) => json!({
-            "fontFamily": "Hanken Grotesk",
-            "fontSize": 0.04,
+            "fontFamily": "Kanit",
+            "fontSize": 0.045,
             "fontWeight": 600,
+            "strokeWidth": 0.004,
+            "strokeColor": "#000000",
         }),
         // Some words' looks are about one title's words, not every
         // caption's, so a style's runs do not carry over.

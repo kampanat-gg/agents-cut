@@ -63,6 +63,8 @@ export struct VideoCard {
     synopsis: string,
     /// idea, storyboard, building, done or exported; empty when unsaid.
     status: string,
+    /// Its folder has a storyboard.md.
+    boarded: bool,
 }
 
 /// One beat of an episode's storyboard, as its storyboard.md says it.
@@ -397,6 +399,8 @@ component Card inherits Rectangle {
     border-color: root.video.current ? Theme.line-strong : Theme.line;
 
     callback storyboard();
+    /// Write the storyboard, from the card of an episode that has none.
+    callback write-storyboard();
 
     touch := TouchArea {
         mouse-cursor: pointer;
@@ -541,6 +545,41 @@ component Card inherits Rectangle {
                 }
             }
         }
+        // An episode with no storyboard yet: the first step, on the card.
+        if root.video.folder != "" && !root.video.boarded: HorizontalLayout {
+            alignment: start;
+            padding-top: 4px;
+            Rectangle {
+                width: write-row.preferred-width + 20px;
+                height: 28px;
+                border-radius: Theme.r;
+                background: write.has-hover && !Agent.busy ? Theme.field-hover : Theme.field;
+                opacity: Agent.busy ? 0.5 : 1;
+                write-row := HorizontalLayout {
+                    x: 10px;
+                    spacing: 6px;
+                    VerticalLayout {
+                        alignment: center;
+                        Image {
+                            width: 12px;
+                            height: 12px;
+                            source: @image-url("../logos/claude-color.svg");
+                        }
+                    }
+                    Text {
+                        text: I18n.t("files.writeStoryboard");
+                        color: Theme.fg;
+                        font-size: Theme.fs-sm;
+                        vertical-alignment: center;
+                    }
+                }
+                write := TouchArea {
+                    enabled: !Agent.busy;
+                    mouse-cursor: Agent.busy ? default : pointer;
+                    clicked => { root.write-storyboard(); }
+                }
+            }
+        }
     }
 
     // The episode's storyboard, in the centre: a card with a folder has one
@@ -593,6 +632,14 @@ export component VideoList inherits Rectangle {
                     Editor.tab-selected(index);
                     Files.storyboard = index;
                     Files.storyboard-opened(Files.videos[index].folder);
+                }
+                // Its conversation first, then the request, and the
+                // storyboard open to watch it being written.
+                write-storyboard => {
+                    Editor.tab-selected(index);
+                    Files.storyboard = index;
+                    Files.storyboard-opened(Files.videos[index].folder);
+                    Agent.send("/storyboard");
                 }
                 picked => {
                     Editor.tab-selected(index);
