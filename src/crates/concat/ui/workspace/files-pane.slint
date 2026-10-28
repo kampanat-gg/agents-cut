@@ -1,0 +1,314 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jareer Abdullah and Concat contributors
+
+// The Files pane: the project's folder as a list, what the agent made
+// and what the user brought, kept up to date as files come and go.
+//
+// A file the timeline can take - a picture, a video, a sound - drags onto
+// the lanes, and a double-click lays it at the playhead; it joins the bin
+// on the way, so there is no import step. The rest open in the
+// application the system gives them. A right-click offers the same, and
+// a way to name the file to the agent.
+
+import { I18n } from "../i18n.slint";
+import { Theme } from "../theme/theme.slint";
+import { Glyph, Icon } from "../icons.slint";
+import { Payload } from "../util.slint";
+import { IconButton } from "../primitives/panel.slint";
+import { Tip } from "../primitives/tooltip.slint";
+import { Pane, PaneHeader, PaneScroll } from "pane.slint";
+import { PaneKind, PaneSwitcher } from "pane-switcher.slint";
+
+/// One line of the list: a folder or a file, `depth` folders down.
+export struct FileRow {
+    /// Relative to the project's folder, with forward slashes: what the
+    /// drag payload and every callback name it by.
+    path: string,
+    name: string,
+    depth: int,
+    folder: bool,
+    /// A folder whose contents are listed under it.
+    open: bool,
+    /// "image", "video", "audio", "text", or "other".
+    kind: string,
+    /// A file's size, a folder's count.
+    meta: string,
+    /// The timeline can take it.
+    placeable: bool,
+    /// A picture's own, small, once it is made; `thumbed` says it is.
+    thumb: image,
+    thumbed: bool,
+}
+
+export global Files {
+    in-out property <[FileRow]> rows;
+    /// A folder's arrow, or a double-click on it.
+    callback toggle(path: string);
+    /// A file double-clicked.
+    callback activate(path: string);
+    /// A row of a file's menu: "add", "mention", "open" or "reveal".
+    callback action(path: string, action: string);
+    /// The header's folder button: the project's folder in the system's
+    /// file manager.
+    callback open-folder();
+}
+
+component MenuRow inherits Rectangle {
+    in property <string> text;
+    in property <Glyph> glyph;
+    callback chosen();
+
+    height: 28px;
+    border-radius: Theme.r-sm;
+    background: touch.has-hover ? Theme.field-hover : transparent;
+
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 10px;
+        spacing: 8px;
+        VerticalLayout {
+            alignment: center;
+            Icon { glyph: root.glyph; size: 13px; }
+        }
+        Text {
+            text: root.text;
+            color: Theme.fg;
+            font-size: Theme.fs-sm;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        clicked => { root.chosen(); }
+    }
+}
+
+component Line inherits Rectangle {
+    in property <FileRow> line;
+    in property <bool> selected;
+    callback picked();
+    callback menu(x: length, y: length);
+
+    property <length> indent: 10px + root.line.depth * 14px;
+    property <brush> ink: root.line.kind == "image" ? Theme.kind-image
+        : root.line.kind == "video" ? Theme.kind-video
+        : root.line.kind == "audio" ? Theme.kind-audio
+        : Theme.fg-muted;
+
+    height: 30px;
+
+    drag := DragArea {
+        // A file the lanes cannot take carries nothing, which is how a
+        // DragArea opts out.
+        data: Payload.of(root.line.placeable ? "file:" + root.line.path : "");
+        drag-image: Payload.preview(root.line.placeable ? "file:" + root.line.path : "");
+        drag-image-offset-x: -8;
+        drag-image-offset-y: -4;
+        allow-copy: true;
+
+        Rectangle {
+            x: 4px;
+            width: parent.width - 8px;
+            border-radius: Theme.r-sm;
+            background: root.selected ? Theme.field-active
+                : touch.has-hover ? Theme.field-hover : transparent;
+
+            // The folder's arrow, or room for one, so names line up.
+            if root.line.folder: Icon {
+                x: root.indent - 4px;
+                y: (parent.height - self.height) / 2;
+                glyph: root.line.open ? Glyph.chevron-down : Glyph.chevron-right;
+                size: 10px;
+                weight: 2.6;
+                tint: Theme.fg-dim;
+            }
+
+            if root.line.thumbed: Rectangle {
+                x: root.indent + 10px;
+                y: (parent.height - self.height) / 2;
+                width: 20px;
+                height: 20px;
+                border-radius: 3px;
+                clip: true;
+                Image {
+                    source: root.line.thumb;
+                    image-fit: cover;
+                }
+            }
+            if !root.line.thumbed: Icon {
+                x: root.indent + 12px;
+                y: (parent.height - self.height) / 2;
+                glyph: root.line.folder ? Glyph.folder
+                    : root.line.kind == "image" ? Glyph.image
+                    : root.line.kind == "video" ? Glyph.film
+                    : root.line.kind == "audio" ? Glyph.music
+                    : root.line.kind == "text" ? Glyph.book
+                    : Glyph.file;
+                size: 15px;
+                tint: root.line.folder ? Theme.fg-muted : root.ink;
+            }
+
+            Text {
+                x: root.indent + 38px;
+                width: parent.width - self.x - meta.width - 14px;
+                height: parent.height;
+                text: root.line.name;
+                color: Theme.fg;
+                font-size: Theme.fs-sm;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            meta := Text {
+                x: parent.width - self.width - 8px;
+                height: parent.height;
+                text: root.line.meta;
+                color: Theme.fg-dim;
+                font-size: Theme.fs-xs;
+                vertical-alignment: center;
+            }
+
+            touch := TouchArea {
+                clicked => { root.picked(); }
+                double-clicked => {
+                    if (root.line.folder) {
+                        Files.toggle(root.line.path);
+                    } else {
+                        Files.activate(root.line.path);
+                    }
+                }
+                pointer-event(event) => {
+                    if (event.button == PointerEventButton.right
+                        && event.kind == PointerEventKind.down) {
+                        root.picked();
+                        if (!root.line.folder) {
+                            root.menu(self.mouse-x, self.mouse-y);
+                        }
+                    }
+                }
+            }
+
+            // A folder's whole line opens and closes it on one click; a
+            // double-click is the same toggle, which Rust takes once.
+            if root.line.folder: TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    root.picked();
+                    Files.toggle(root.line.path);
+                }
+            }
+        }
+    }
+}
+
+export component FilesPane inherits Pane {
+    in property <int> pane-seat;
+    in property <bool> pane-removable;
+    callback pane-picked(kind: PaneKind);
+    callback pane-removed();
+
+    /// The line picked last, by path; the pane's own, not the project's.
+    property <string> selected;
+    /// The file a menu was opened on, and where.
+    property <FileRow> menu-row;
+    property <length> menu-x;
+    property <length> menu-y;
+
+    PaneHeader {
+        title: I18n.t("files.title");
+
+        IconButton {
+            glyph: Glyph.folder;
+            label: I18n.t("files.openFolder");
+            clicked => { Files.open-folder(); }
+        }
+        VerticalLayout {
+            alignment: center;
+            PaneSwitcher {
+                kind: PaneKind.files;
+                seat: root.pane-seat;
+                removable: root.pane-removable;
+                picked(kind) => { root.pane-picked(kind); }
+                removed => { root.pane-removed(); }
+            }
+        }
+    }
+
+    body := Rectangle {
+        vertical-stretch: 1;
+
+        if Files.rows.length == 0: VerticalLayout {
+            padding: 24px;
+            alignment: center;
+            spacing: 6px;
+            Text {
+                text: I18n.t("files.empty");
+                color: Theme.fg;
+                font-size: Theme.fs;
+                horizontal-alignment: center;
+            }
+            Text {
+                text: I18n.t("files.emptyNote");
+                color: Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+
+        PaneScroll {
+            VerticalLayout {
+                padding-top: 6px;
+                padding-bottom: 6px;
+                for row in Files.rows: Line {
+                    line: row;
+                    selected: row.path == root.selected;
+                    picked => { root.selected = row.path; }
+                    menu(x, y) => {
+                        root.menu-row = row;
+                        root.menu-x = self.absolute-position.x - body.absolute-position.x + x;
+                        root.menu-y = self.absolute-position.y - body.absolute-position.y + y;
+                        menu.show();
+                    }
+                }
+            }
+        }
+
+        menu := PopupWindow {
+            x: Math.min(root.menu-x, body.width - 196px);
+            y: root.menu-y;
+            width: 188px;
+            close-policy: close-on-click-outside;
+
+            Rectangle {
+                background: Theme.field;
+                border-width: 1px;
+                border-color: Theme.line-strong;
+                border-radius: Theme.r;
+
+                VerticalLayout {
+                    padding: 4px;
+                    if root.menu-row.placeable: MenuRow {
+                        text: I18n.t("files.add");
+                        glyph: Glyph.plus;
+                        chosen => { menu.close(); Files.action(root.menu-row.path, "add"); }
+                    }
+                    MenuRow {
+                        text: I18n.t("files.mention");
+                        glyph: Glyph.sparkle;
+                        chosen => { menu.close(); Files.action(root.menu-row.path, "mention"); }
+                    }
+                    MenuRow {
+                        text: I18n.t("files.open");
+                        glyph: Glyph.arrow-up-right;
+                        chosen => { menu.close(); Files.action(root.menu-row.path, "open"); }
+                    }
+                    MenuRow {
+                        text: I18n.t("files.reveal");
+                        glyph: Glyph.folder;
+                        chosen => { menu.close(); Files.action(root.menu-row.path, "reveal"); }
+                    }
+                }
+            }
+        }
+    }
+}

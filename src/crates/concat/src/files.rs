@@ -1,0 +1,531 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jareer Abdullah and Concat contributors
+
+//! The Files pane's side: the open project's folder as a list of lines,
+//! read again every couple of seconds so what the agent makes shows up
+//! while it makes it.
+//!
+//! Folders at the top open on their own and deeper ones closed - a motion
+//! sequence is a folder of a hundred frames - and only an open folder is
+//! read past its count. Pictures get a small thumbnail, made on a thread
+//! of its own and kept until the file changes.
+//!
+//! A file goes onto the timeline by the payload `file:<path>`, the path
+//! relative to the project; it joins the bin on the way (see
+//! [`Studio::place_file`]), so the agent's pictures need no import.
+
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::rc::Rc;
+use std::time::{Duration, Instant, SystemTime};
+
+use slint::{Model, VecModel};
+
+use crate::host::Shell;
+use crate::i18n::tf;
+use crate::studio::Studio;
+use crate::ui::FileRow;
+
+/// How often the open project's folder is read again.
+const EVERY: Duration = Duration::from_secs(2);
+
+/// What a project's folder holds that is the editor's, not the user's.
+const HIDDEN: [&str; 3] = ["cache", "concat.json", "concat.lock"];
+
+/// Lines past this many are not listed: a folder that size is not one to
+/// read through in a side panel.
+const MOST: usize = 2000;
+
+/// Toggles of one folder this close together are one.
+const TWICE: Duration = Duration::from_millis(500);
+
+/// A thumbnail's longer side, in pixels: twice the 20pt it is drawn at.
+const THUMB: u32 = 48;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Image,
+    Video,
+    Audio,
+    Text,
+    Other,
+}
+
+impl Kind {
+    pub fn of(path: &Path) -> Kind {
+        let extension = path
+            .extension()
+            .map(|extension| extension.to_string_lossy().to_lowercase())
+            .unwrap_or_default();
+        match extension.as_str() {
+            "png" | "jpg" | "jpeg" | "webp" | "gif" | "bmp" | "tif" | "tiff" | "svg" => Kind::Image,
+            "mp4" | "mov" | "mkv" | "webm" | "avi" | "m4v" => Kind::Video,
+            "mp3" | "wav" | "aac" | "m4a" | "flac" | "ogg" => Kind::Audio,
+            "md" | "txt" | "toml" | "json" | "srt" | "vtt" | "csv" => Kind::Text,
+            _ => Kind::Other,
+        }
+    }
+
+    /// The timeline can take it.
+    pub fn placeable(self) -> bool {
+        matches!(self, Kind::Image | Kind::Video | Kind::Audio)
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Kind::Image => "image",
+            Kind::Video => "video",
+            Kind::Audio => "audio",
+            Kind::Text => "text",
+            Kind::Other => "other",
+        }
+    }
+}
+
+/// One line as read from the disk.
+#[derive(Clone, Debug, PartialEq)]
+struct Entry {
+    /// Relative to the project, with forward slashes.
+    path: String,
+    name: String,
+    depth: usize,
+    folder: bool,
+    /// A file's size; a folder's count of what is in it.
+    size: u64,
+    modified: Option<SystemTime>,
+}
+
+pub struct Files {
+    rows: Rc<VecModel<FileRow>>,
+    folder: Option<PathBuf>,
+    listed: Vec<Entry>,
+    /// Folders listed open, and every folder seen, so one that appears
+    /// later is opened or not by its depth only the first time.
+    open: HashSet<String>,
+    seen: HashSet<String>,
+    /// Each picture's thumbnail, with the time of the file it was made from.
+    thumbs: HashMap<String, (Option<SystemTime>, slint::Image)>,
+    /// Pictures a thumbnail is being made for.
+    asked: HashSet<String>,
+    /// Each video's and sound's length, by path and the file's time: a drag
+    /// asks on every move over the lanes.
+    lengths: RefCell<HashMap<String, (Option<SystemTime>, f64)>>,
+    /// The folder toggled last, and when.
+    toggled: Option<(String, Instant)>,
+    timer: slint::Timer,
+}
+
+impl Default for Files {
+    fn default() -> Self {
+        Files {
+            rows: Rc::new(VecModel::default()),
+            folder: None,
+            listed: Vec::new(),
+            open: HashSet::new(),
+            seen: HashSet::new(),
+            thumbs: HashMap::new(),
+            asked: HashSet::new(),
+            lengths: RefCell::new(HashMap::new()),
+            toggled: None,
+            timer: slint::Timer::default(),
+        }
+    }
+}
+
+impl Files {
+    /// The lines, handed to the pane once.
+    pub fn rows(&self) -> Rc<VecModel<FileRow>> {
+        Rc::clone(&self.rows)
+    }
+
+    /// Lists the project at `folder`, and keeps listing it.
+    pub fn load(&mut self, folder: &Path) {
+        *self = Files {
+            rows: Rc::clone(&self.rows),
+            folder: Some(folder.to_path_buf()),
+            ..Files::default()
+        };
+        self.refresh();
+        self.timer.start(slint::TimerMode::Repeated, EVERY, || {
+            Shell::with(|shell, _| shell.studio.borrow_mut().files.refresh());
+        });
+    }
+
+    /// The file at `path`, relative to the project, as a full path.
+    pub fn full(&self, path: &str) -> Option<PathBuf> {
+        let path = Path::new(path);
+        // Never out of the folder: the path comes back from the pane.
+        if path.is_absolute() || path.components().any(|part| part.as_os_str() == "..") {
+            return None;
+        }
+        Some(self.folder.as_ref()?.join(path))
+    }
+
+    /// Opens a folder's line, or closes it.
+    pub fn toggle(&mut self, path: &str) {
+        // A double-click is two clicks and a double-click, and means
+        // one toggle.
+        let now = Instant::now();
+        if let Some((last, at)) = &self.toggled
+            && last == path
+            && now.duration_since(*at) < TWICE
+        {
+            return;
+        }
+        self.toggled = Some((path.to_owned(), now));
+        if !self.open.remove(path) {
+            self.open.insert(path.to_owned());
+        }
+        self.refresh();
+    }
+
+    /// Reads the folder again, and redraws the list if anything changed.
+    pub fn refresh(&mut self) {
+        let Some(folder) = self.folder.clone() else {
+            return;
+        };
+        let mut listed = Vec::new();
+        self.walk(&folder, "", 0, &mut listed);
+        if listed != self.listed {
+            self.listed = listed;
+            self.thumbs
+                .retain(|path, _| self.listed.iter().any(|entry| entry.path == *path));
+            self.ask_thumbs();
+            self.draw();
+        }
+    }
+
+    fn walk(&mut self, dir: &Path, prefix: &str, depth: usize, out: &mut Vec<Entry>) {
+        for (name, path, folder) in children(dir, depth == 0) {
+            if out.len() >= MOST {
+                return;
+            }
+            let relative = format!("{prefix}{name}");
+            let meta = std::fs::metadata(&path).ok();
+            if folder {
+                if self.seen.insert(relative.clone()) && depth == 0 {
+                    self.open.insert(relative.clone());
+                }
+                out.push(Entry {
+                    path: relative.clone(),
+                    name,
+                    depth,
+                    folder: true,
+                    size: children(&path, false).len() as u64,
+                    modified: None,
+                });
+                if self.open.contains(&relative) {
+                    self.walk(&path, &format!("{relative}/"), depth + 1, out);
+                }
+            } else {
+                out.push(Entry {
+                    path: relative,
+                    name,
+                    depth,
+                    folder: false,
+                    size: meta.as_ref().map_or(0, std::fs::Metadata::len),
+                    modified: meta.and_then(|meta| meta.modified().ok()),
+                });
+            }
+        }
+    }
+
+    /// Starts a thread making the thumbnails the listed pictures lack.
+    fn ask_thumbs(&mut self) {
+        let Some(folder) = self.folder.clone() else {
+            return;
+        };
+        let wanted: Vec<(String, Option<SystemTime>)> = self
+            .listed
+            .iter()
+            .filter(|entry| !entry.folder && Kind::of(Path::new(&entry.name)) == Kind::Image)
+            .filter(|entry| {
+                self.thumbs
+                    .get(&entry.path)
+                    .is_none_or(|(made, _)| *made != entry.modified)
+            })
+            .filter(|entry| !self.asked.contains(&entry.path))
+            .map(|entry| (entry.path.clone(), entry.modified))
+            .collect();
+        if wanted.is_empty() {
+            return;
+        }
+        self.asked
+            .extend(wanted.iter().map(|(path, _)| path.clone()));
+        let spawned = std::thread::Builder::new()
+            .name("thumbnails".to_owned())
+            .spawn(move || {
+                for (path, modified) in wanted {
+                    let pixels = thumbnail(&folder.join(&path));
+                    let _ = slint::invoke_from_event_loop(move || {
+                        Shell::with(|shell, _| {
+                            shell
+                                .studio
+                                .borrow_mut()
+                                .files
+                                .thumb_made(path, modified, pixels);
+                        });
+                    });
+                }
+            });
+        if spawned.is_err() {
+            self.asked.clear();
+        }
+    }
+
+    fn thumb_made(
+        &mut self,
+        path: String,
+        modified: Option<SystemTime>,
+        pixels: Option<slint::SharedPixelBuffer<slint::Rgba8Pixel>>,
+    ) {
+        self.asked.remove(&path);
+        let image = pixels.map(slint::Image::from_rgba8).unwrap_or_default();
+        let row = self.listed.iter().position(|entry| entry.path == path);
+        self.thumbs.insert(path, (modified, image.clone()));
+        if let Some(row) = row
+            && let Some(mut line) = self.rows.row_data(row)
+        {
+            line.thumbed = image.size().width > 0;
+            line.thumb = image;
+            self.rows.set_row_data(row, line);
+        }
+    }
+
+    fn draw(&self) {
+        let lines: Vec<FileRow> = self
+            .listed
+            .iter()
+            .map(|entry| {
+                let kind = Kind::of(Path::new(&entry.name));
+                let thumb = self
+                    .thumbs
+                    .get(&entry.path)
+                    .map(|(_, image)| image.clone())
+                    .unwrap_or_default();
+                FileRow {
+                    path: entry.path.as_str().into(),
+                    name: entry.name.as_str().into(),
+                    depth: entry.depth as i32,
+                    folder: entry.folder,
+                    open: entry.folder && self.open.contains(&entry.path),
+                    kind: if entry.folder { "folder" } else { kind.name() }.into(),
+                    meta: if entry.folder {
+                        entry.size.to_string()
+                    } else {
+                        crate::format::bytes(entry.size as f32)
+                    }
+                    .into(),
+                    placeable: !entry.folder && kind.placeable(),
+                    thumbed: thumb.size().width > 0,
+                    thumb,
+                }
+            })
+            .collect();
+        self.rows.set_vec(lines);
+    }
+
+    /// How long a video or a sound runs, in seconds, asked of the file once
+    /// for each time it changes.
+    pub fn length(&self, path: &str) -> Option<f64> {
+        let full = self.full(path)?;
+        let modified = std::fs::metadata(&full).ok()?.modified().ok();
+        if let Some((made, seconds)) = self.lengths.borrow().get(path)
+            && *made == modified
+        {
+            return Some(*seconds);
+        }
+        let seconds = concat_host::media::probe(&full.to_string_lossy())
+            .ok()?
+            .duration?;
+        self.lengths
+            .borrow_mut()
+            .insert(path.to_owned(), (modified, seconds));
+        Some(seconds)
+    }
+}
+
+/// Opens a file of the project's in the application the system gives it,
+/// or with an empty path the project's folder itself.
+pub fn open(studio: &mut Studio, path: &str) {
+    let Some(full) = studio.files.full(path) else {
+        return;
+    };
+    if let Err(error) = opener::open(&full) {
+        studio.notify(&error.to_string(), true);
+    }
+}
+
+/// What is in `dir` worth a line, folders first and each lot by name: its
+/// name, its path, and whether it is a folder. `top` leaves out the
+/// editor's own files, which only the project's folder itself has.
+fn children(dir: &Path, top: bool) -> Vec<(String, PathBuf, bool)> {
+    let Ok(read) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut found: Vec<(String, PathBuf, bool)> = read
+        .flatten()
+        .filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with('.') || (top && HIDDEN.contains(&name.as_str())) {
+                return None;
+            }
+            let folder = entry.file_type().ok()?.is_dir();
+            Some((name, entry.path(), folder))
+        })
+        .collect();
+    found.sort_by(|a, b| {
+        b.2.cmp(&a.2)
+            .then_with(|| a.0.to_lowercase().cmp(&b.0.to_lowercase()))
+    });
+    found
+}
+
+/// A picture made small, or None for one that does not read.
+fn thumbnail(path: &Path) -> Option<slint::SharedPixelBuffer<slint::Rgba8Pixel>> {
+    let small = image::open(path).ok()?.thumbnail(THUMB, THUMB).into_rgba8();
+    Some(slint::SharedPixelBuffer::clone_from_slice(
+        small.as_raw(),
+        small.width(),
+        small.height(),
+    ))
+}
+
+impl Studio {
+    /// A file of the project's laid on the timeline: onto `track_id` at
+    /// `start`, or at `start` on the first lane with room. It joins the
+    /// bin first if it is not in it.
+    pub fn place_file(&mut self, path: &str, track_id: Option<String>, start: f64) {
+        let media_id = match self.adopt_file(path) {
+            Ok(id) => id,
+            Err(error) => {
+                self.notify(&error, true);
+                return;
+            }
+        };
+        self.close_source();
+        let created = match track_id {
+            Some(track_id) => self.apply(concat_project::Command::AddClip {
+                media_id,
+                track_id,
+                start,
+                ripple: true,
+            }),
+            None => self.apply(concat_project::Command::AddClipAtFirstFree { media_id, start }),
+        };
+        if let Some(id) = created {
+            self.selection = vec![id];
+        }
+    }
+
+    /// The bin's id for a file of the project's, imported when it is not
+    /// in the bin yet.
+    fn adopt_file(&mut self, path: &str) -> Result<String, String> {
+        let full = self
+            .files
+            .full(path)
+            .ok_or_else(|| tf("files.couldNotAdd", &[&path, &"?"]))?;
+        let text = full.to_string_lossy().into_owned();
+        let same = |item: &concat_project::model::MediaItem| {
+            item.path == text
+                || Path::new(&item.path).canonicalize().ok() == full.canonicalize().ok()
+        };
+        if let Some(item) = self.project().media.iter().find(|item| same(item)) {
+            return Ok(item.id.clone());
+        }
+        let summary = concat_host::media::probe(&text)
+            .map_err(|error| tf("files.couldNotAdd", &[&path, &error]))?;
+        let created = self.apply(concat_project::Command::AddMedia {
+            item: summary.to_new_media(),
+        });
+        created
+            .or_else(|| {
+                self.project()
+                    .media
+                    .iter()
+                    .find(|item| item.path == text)
+                    .map(|item| item.id.clone())
+            })
+            .ok_or_else(|| tf("files.couldNotAdd", &[&path, &"?"]))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An empty folder of this test's own, left for the system's sweep.
+    fn scratch(name: &str) -> PathBuf {
+        let folder =
+            std::env::temp_dir().join(format!("concat-files-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).expect("scratch");
+        folder
+    }
+
+    #[test]
+    fn the_list_leaves_out_the_editors_files_and_opens_only_the_top() {
+        let folder = scratch("list");
+        for dir in ["cache/art", "generated/kraken/frames", "assets"] {
+            std::fs::create_dir_all(folder.join(dir)).expect("dir");
+        }
+        for file in [
+            "concat.json",
+            ".DS_Store",
+            "CLAUDE.md",
+            "generated/sea.png",
+            "generated/kraken/frames/0001.png",
+            "assets/song.mp3",
+        ] {
+            std::fs::write(folder.join(file), b"x").expect("file");
+        }
+        let mut files = Files {
+            folder: Some(folder.clone()),
+            ..Files::default()
+        };
+        let mut listed = Vec::new();
+        files.walk(&folder, "", 0, &mut listed);
+        let paths: Vec<&str> = listed.iter().map(|entry| entry.path.as_str()).collect();
+        assert_eq!(
+            paths,
+            [
+                "assets",
+                "assets/song.mp3",
+                "generated",
+                "generated/kraken",
+                "generated/sea.png",
+                "CLAUDE.md",
+            ]
+        );
+        let kraken = listed.iter().find(|entry| entry.path == "generated/kraken");
+        assert_eq!(
+            kraken.map(|entry| entry.size),
+            Some(1),
+            "a closed folder's count"
+        );
+    }
+
+    #[test]
+    fn a_path_from_the_pane_stays_in_the_project() {
+        let files = Files {
+            folder: Some(PathBuf::from("/projects/one")),
+            ..Files::default()
+        };
+        assert_eq!(
+            files.full("generated/a.png"),
+            Some(PathBuf::from("/projects/one/generated/a.png"))
+        );
+        assert_eq!(files.full("../two/a.png"), None);
+        assert_eq!(files.full("/etc/hosts"), None);
+    }
+
+    #[test]
+    fn kinds_go_by_extension() {
+        assert_eq!(Kind::of(Path::new("a.PNG")), Kind::Image);
+        assert_eq!(Kind::of(Path::new("a.webm")), Kind::Video);
+        assert_eq!(Kind::of(Path::new("a.mp3")), Kind::Audio);
+        assert_eq!(Kind::of(Path::new("CLAUDE.md")), Kind::Text);
+        assert!(!Kind::of(Path::new("style.toml")).placeable());
+    }
+}

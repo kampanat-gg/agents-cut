@@ -836,6 +836,8 @@ pub struct Studio {
     pub prefs: Preferences,
     /// The agent's conversation in the sidebar; see `agent.rs`.
     pub agent: crate::agent::Chat,
+    /// The Files pane's list of the project's folder.
+    pub files: crate::files::Files,
     /// What each effect library is showing, indexed the way `SHELF_KINDS`
     /// is: 0 filters, 1 effects, 2 audio.
     pub library: [LibraryView; 4],
@@ -2370,6 +2372,7 @@ impl Studio {
         let mut studio = Self {
             prefs,
             agent: Default::default(),
+            files: Default::default(),
             library: Default::default(),
             session: None,
             echo: None,
@@ -3828,6 +3831,26 @@ impl Studio {
     /// What a library payload names - "media:12", "text:default:Title" -
     /// before the timeline has decided where to put it.
     pub fn incoming(&self, payload: &str) -> Option<DropPlan> {
+        // A file of the project's, from the Files pane: a path, which may
+        // have colons of its own, and not in the bin until it lands.
+        if let Some(path) = payload.strip_prefix("file:") {
+            let kind = crate::files::Kind::of(std::path::Path::new(path));
+            let name = path.rsplit('/').next().unwrap_or(path);
+            let (kind, duration) = match kind {
+                crate::files::Kind::Image => (ClipKind::Image, LAYER_DURATION),
+                crate::files::Kind::Video => (ClipKind::Video, self.files.length(path)? as f32),
+                crate::files::Kind::Audio => (ClipKind::Audio, self.files.length(path)? as f32),
+                _ => return None,
+            };
+            return Some(DropPlan {
+                kind,
+                label: name.to_owned(),
+                media: payload.to_owned(),
+                start: 0.0,
+                duration: duration.max(MIN_DURATION),
+                row: 0,
+            });
+        }
         let mut fields = payload.splitn(3, ':');
         let (sort, id) = (fields.next()?, fields.next()?);
         let label = fields.next().unwrap_or(id);
@@ -3959,6 +3982,10 @@ impl Studio {
             self.place_card(card, Some(track_id), f64::from(plan.start));
             return;
         }
+        if let Some(path) = plan.media.strip_prefix("file:") {
+            self.place_file(path, Some(track_id), f64::from(plan.start));
+            return;
+        }
         let created = if plan.kind == ClipKind::Text {
             self.add_title(
                 Some(track_id),
@@ -4015,6 +4042,10 @@ impl Studio {
         let start = f64::from(self.playhead.max(0.0));
         if let Some(card) = plan.media.strip_prefix("sound:") {
             self.place_card(card, None, start);
+            return;
+        }
+        if let Some(path) = plan.media.strip_prefix("file:") {
+            self.place_file(path, None, start);
             return;
         }
         let created = if plan.kind == ClipKind::Text {
@@ -8725,6 +8756,7 @@ impl Studio {
                 let folder =
                     std::path::PathBuf::from(self.session.as_ref().map_or("", |s| s.path()));
                 self.agent.load_style(&folder);
+                self.files.load(&folder);
                 // The relink dialog belongs to the project that opened it;
                 // this project's own check follows below.
                 self.relink = Default::default();

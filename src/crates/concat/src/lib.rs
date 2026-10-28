@@ -34,6 +34,7 @@ mod agent;
 mod batch_volume;
 mod chips;
 mod dock;
+mod files;
 mod fonts;
 mod format;
 mod gpu;
@@ -709,6 +710,44 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         }));
         agent.on_shown_changed(on_window!(|state, shown: bool| {
             state.agent.set_shown(shown);
+        }));
+    }
+
+    // ── the Files pane ──
+    {
+        let files = app.global::<ui::Files>();
+        files.set_rows(ModelRc::from(shell.studio.borrow().files.rows()));
+        files.on_toggle(on_window!(|state, path: SharedString| {
+            state.files.toggle(path.as_str());
+        }));
+        // A double-click lays a picture, a video or a sound at the
+        // playhead, and opens anything else where the system would.
+        files.on_activate(on_window!(|state, path: SharedString| {
+            if files::Kind::of(std::path::Path::new(path.as_str())).placeable() {
+                state.place_at_playhead(&format!("file:{path}"));
+            } else {
+                files::open(&mut state, path.as_str());
+            }
+        }));
+        files.on_action(on_window!(
+            |state, path: SharedString, action: SharedString| {
+                match action.as_str() {
+                    "add" => state.place_at_playhead(&format!("file:{path}")),
+                    "mention" => state.agent.mention(&format!("@{path}")),
+                    "open" => files::open(&mut state, path.as_str()),
+                    "reveal" => {
+                        if let Some(full) = state.files.full(path.as_str())
+                            && let Err(error) = platform::reveal(&full.to_string_lossy())
+                        {
+                            state.notify(&error, true);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        ));
+        files.on_open_folder(on_window!(|state| {
+            files::open(&mut state, "");
         }));
     }
 

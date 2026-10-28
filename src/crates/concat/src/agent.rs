@@ -266,6 +266,14 @@ impl Chat {
         Some(EFFORTS[self.effort].to_owned()).filter(|level| !level.is_empty())
     }
 
+    /// Puts `words` in the box, after whatever is typed there, and opens
+    /// the sidebar if it is folded away.
+    pub fn mention(&mut self, words: &str) {
+        self.attached = format!("{words} ");
+        self.attached_token += 1;
+        self.shown = true;
+    }
+
     /// Writes what the sidebar shows that is not a row.
     pub fn publish(&self, app: &App) {
         let agent = app.global::<Agent>();

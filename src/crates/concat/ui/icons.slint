@@ -171,6 +171,8 @@ export enum Glyph {
     move,
     wand,
     sliders,
+    /// a file of no kind the editor knows
+    file,
 }
 
 component Stroked inherits Path {
@@ -250,6 +252,13 @@ export component Icon inherits Rectangle {
         size: root.size; tint: root.tint; weight: root.weight;
         commands: "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9"
             + "A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z";
+    }
+
+    // lucide/file
+    if root.glyph == Glyph.file: Stroked {
+        size: root.size; tint: root.tint; weight: root.weight;
+        commands: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"
+            + " M14 2v4a2 2 0 0 0 2 2h4";
     }
 
     // lucide/book-open
