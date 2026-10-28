@@ -5128,20 +5128,29 @@ impl Studio {
                 };
                 if edge == Edge::Start {
                     // The head cannot pass the tail, and cannot pull material
-                    // out of a file that has none before the in-point.
+                    // out of a file that has none before the in-point - a
+                    // file's cut only: a still, a title, a shape or a layer
+                    // has no source to run out of, as the command knows too.
                     let wanted = self.snapped(start + seconds, threshold, &id);
                     let limit = start + duration - MIN_DURATION;
-                    let at = wanted.clamp(
-                        (start - source_start / speed.max(0.01))
-                            .max(floor)
-                            .min(limit),
-                        limit,
-                    );
+                    let timed = self.clip(&id).is_some_and(|clip| {
+                        matches!(
+                            clip.kind,
+                            concat_project::model::ClipKind::Video
+                                | concat_project::model::ClipKind::Audio
+                        )
+                    });
+                    let source_floor = if timed {
+                        start - source_start / speed.max(0.01)
+                    } else {
+                        f32::NEG_INFINITY
+                    };
+                    let at = wanted.clamp(source_floor.max(floor).min(limit), limit);
                     let delta = at - start;
                     if let Some(clip) = self.echo_clip_mut(&id) {
                         clip.start = f64::from(at);
                         clip.duration = f64::from(duration - delta);
-                        clip.source_start = f64::from(source_start + delta * speed);
+                        clip.source_start = f64::from((source_start + delta * speed).max(0.0));
                     }
                     // Trim follow: the playhead on the new first frame.
                     if self.prefs.trim_follow {

@@ -25,7 +25,7 @@ use slint::{Model, VecModel};
 use crate::host::Shell;
 use crate::i18n::tf;
 use crate::studio::Studio;
-use crate::ui::{FileRow, VideoCard};
+use crate::ui::{FileRow, StoryBeat, VideoCard};
 
 /// How often the open project's folder is read again.
 const EVERY: Duration = Duration::from_secs(2);
@@ -100,6 +100,10 @@ pub struct Files {
     rows: Rc<VecModel<FileRow>>,
     /// The project's videos, one a timeline: the side panel's cards.
     videos: Rc<VecModel<VideoCard>>,
+    /// The storyboard open in the centre - its episode's folder and the
+    /// time of the file its beats were read from - and its beats.
+    story: Option<(String, Option<SystemTime>)>,
+    beats: Rc<VecModel<StoryBeat>>,
     folder: Option<PathBuf>,
     listed: Vec<Entry>,
     /// Folders listed open, and every folder seen, so one that appears
@@ -113,6 +117,11 @@ pub struct Files {
     /// Each video's and sound's length, by path and the file's time: a drag
     /// asks on every move over the lanes.
     lengths: RefCell<HashMap<String, (Option<SystemTime>, f64)>>,
+    /// Each timeline's episode, by its name: the folder and its brief,
+    /// with the times of the `episodes` folder and the brief they were
+    /// read at. The cards are drawn on every publish of the lanes, and
+    /// two looks at the disk are all an unchanged one costs.
+    episodes: RefCell<HashMap<String, Episode>>,
     /// The folder toggled last, and when.
     toggled: Option<(String, Instant)>,
     timer: slint::Timer,
@@ -123,6 +132,8 @@ impl Default for Files {
         Files {
             rows: Rc::new(VecModel::default()),
             videos: Rc::new(VecModel::default()),
+            story: None,
+            beats: Rc::new(VecModel::default()),
             folder: None,
             listed: Vec::new(),
             open: HashSet::new(),
@@ -130,6 +141,7 @@ impl Default for Files {
             thumbs: HashMap::new(),
             asked: HashSet::new(),
             lengths: RefCell::new(HashMap::new()),
+            episodes: RefCell::new(HashMap::new()),
             toggled: None,
             timer: slint::Timer::default(),
         }
@@ -142,6 +154,60 @@ impl Files {
         Rc::clone(&self.rows)
     }
 
+    /// The storyboard's beats, handed to its view once.
+    pub fn beats(&self) -> Rc<VecModel<StoryBeat>> {
+        Rc::clone(&self.beats)
+    }
+
+    /// Shows the storyboard of the episode in `folder`, and keeps it
+    /// current as its file changes.
+    pub fn open_storyboard(&mut self, folder: &str) {
+        self.story = Some((folder.to_owned(), None));
+        self.reread_storyboard();
+    }
+
+    pub fn close_storyboard(&mut self) {
+        self.story = None;
+        self.beats.set_vec(Vec::new());
+    }
+
+    /// Reads the open storyboard again when its file has changed since.
+    fn reread_storyboard(&mut self) {
+        let (Some(project), Some((folder, read))) = (self.folder.clone(), self.story.clone())
+        else {
+            return;
+        };
+        let file = project.join(&folder).join("storyboard.md");
+        let modified = std::fs::metadata(&file)
+            .ok()
+            .and_then(|meta| meta.modified().ok());
+        if read.is_some() && read == modified {
+            return;
+        }
+        self.story = Some((folder.clone(), modified));
+        let beats: Vec<StoryBeat> = crate::episodes::storyboard(&project, &folder)
+            .into_iter()
+            .map(|beat| {
+                let picture = beat
+                    .image
+                    .as_ref()
+                    .and_then(|image| thumbnail_of(&project.join(&folder).join(image), STORY_THUMB))
+                    .map(slint::Image::from_rgba8);
+                StoryBeat {
+                    time: beat.time.into(),
+                    title: beat.title.into(),
+                    voice: beat.voice.into(),
+                    picture: beat.picture.into(),
+                    motion: beat.motion.into(),
+                    sound: beat.sound.into(),
+                    has_image: picture.is_some(),
+                    image: picture.unwrap_or_default(),
+                }
+            })
+            .collect();
+        self.beats.set_vec(beats);
+    }
+
     /// The video cards, handed to the side panel once.
     pub fn videos(&self) -> Rc<VecModel<VideoCard>> {
         Rc::clone(&self.videos)
@@ -152,6 +218,7 @@ impl Files {
         *self = Files {
             rows: Rc::clone(&self.rows),
             videos: Rc::clone(&self.videos),
+            beats: Rc::clone(&self.beats),
             folder: Some(folder.to_path_buf()),
             ..Files::default()
         };
@@ -194,6 +261,7 @@ impl Files {
         let Some(folder) = self.folder.clone() else {
             return;
         };
+        self.reread_storyboard();
         let mut listed = Vec::new();
         self.walk(&folder, "", 0, &mut listed);
         if listed != self.listed {
@@ -401,14 +469,62 @@ fn rate(fps: f64) -> String {
     }
 }
 
+/// A storyboard picture's longer side, in pixels: twice what it is drawn at.
+const STORY_THUMB: u32 = 320;
+
 /// A picture made small, or None for one that does not read.
 fn thumbnail(path: &Path) -> Option<slint::SharedPixelBuffer<slint::Rgba8Pixel>> {
-    let small = image::open(path).ok()?.thumbnail(THUMB, THUMB).into_rgba8();
+    thumbnail_of(path, THUMB)
+}
+
+fn thumbnail_of(path: &Path, side: u32) -> Option<slint::SharedPixelBuffer<slint::Rgba8Pixel>> {
+    let small = image::open(path).ok()?.thumbnail(side, side).into_rgba8();
     Some(slint::SharedPixelBuffer::clone_from_slice(
         small.as_raw(),
         small.width(),
         small.height(),
     ))
+}
+
+/// A timeline's episode, as last read: see [`Files::episodes`].
+#[derive(Clone, Default)]
+struct Episode {
+    listing: Option<SystemTime>,
+    written: Option<SystemTime>,
+    folder: Option<String>,
+    brief: crate::episodes::Brief,
+}
+
+impl Files {
+    /// The episode the timeline named `name` is: its folder relative to
+    /// the project, and what its brief says. Read again only when the
+    /// `episodes` folder or the brief has changed.
+    pub fn episode(&self, name: &str) -> (Option<String>, crate::episodes::Brief) {
+        let Some(project) = self.folder.as_ref() else {
+            return (None, crate::episodes::Brief::default());
+        };
+        let modified = |path: &Path| {
+            std::fs::metadata(path)
+                .ok()
+                .and_then(|meta| meta.modified().ok())
+        };
+        let listing = modified(&project.join(crate::episodes::FOLDER));
+        let mut cache = self.episodes.borrow_mut();
+        let entry = cache.entry(name.to_owned()).or_default();
+        if entry.listing != listing || entry.folder.is_none() && listing.is_some() {
+            entry.listing = listing;
+            entry.folder = crate::episodes::folder_of(project, name);
+            entry.written = None;
+        }
+        if let Some(folder) = &entry.folder {
+            let written = modified(&project.join(folder).join("brief.md"));
+            if written != entry.written {
+                entry.written = written;
+                entry.brief = crate::episodes::brief(project, folder);
+            }
+        }
+        (entry.folder.clone(), entry.brief.clone())
+    }
 }
 
 impl Studio {
@@ -433,7 +549,11 @@ impl Studio {
                     })
                     .min_by(|a, b| a.start.total_cmp(&b.start))
                     .and_then(|clip| self.media.thumbs.get(&clip.media_id).cloned());
+                let (folder, brief) = self.files.episode(&timeline.name);
                 VideoCard {
+                    folder: folder.unwrap_or_default().into(),
+                    synopsis: brief.synopsis.into(),
+                    status: brief.status.into(),
                     name: timeline.name.as_str().into(),
                     seconds: timeline.duration() as f32,
                     frame: format!(
@@ -450,6 +570,13 @@ impl Studio {
                 }
             })
             .collect();
+        // Each episode with a folder has a conversation of its own.
+        let episodes: Vec<(String, String)> = cards
+            .iter()
+            .filter(|card| !card.folder.is_empty())
+            .map(|card| (card.folder.to_string(), card.name.to_string()))
+            .collect();
+        self.agent.list_threads(episodes);
         crate::studio::sync(&self.files.videos, cards);
     }
 

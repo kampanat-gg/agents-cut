@@ -4293,6 +4293,38 @@ mod tests {
         );
     }
 
+    /// A layer has no file under it, so nothing stops its head: dragged
+    /// left it grows as far as its tail would, where a cut of a file stops
+    /// at the file's first frame.
+    #[test]
+    fn a_layer_grows_at_its_head() {
+        let mut editor = Editor::new();
+        let layer_id = editor
+            .apply(Command::AddLayerClip {
+                track_id: None,
+                start: 5.0,
+                duration: Some(2.0),
+                effect_id: "concat.adjust".into(),
+                name: "Fog".into(),
+                sound: false,
+            })
+            .expect("adds")
+            .created_id
+            .expect("id");
+        editor
+            .apply(Command::TrimClip {
+                clip_id: layer_id.clone(),
+                edge: TrimEdge::Start,
+                delta: -3.0,
+                ripple: false,
+            })
+            .expect("trims the head");
+        let layer = editor.project().active().clip(&layer_id).expect("exists");
+        assert!((layer.start - 2.0).abs() < 1e-9, "{}", layer.start);
+        assert!((layer.duration - 5.0).abs() < 1e-9, "{}", layer.duration);
+        assert!(layer.source_start.abs() < 1e-9);
+    }
+
     /// An adjustment layer laid at the playhead lands over the footage,
     /// with the colour panel's package as its chain at its defaults: a
     /// layer under the picture would treat nothing (#249).

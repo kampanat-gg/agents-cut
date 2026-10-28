@@ -82,8 +82,8 @@ import { TooltipLayer } from "primitives/tooltip.slint";
 import { FontSearch } from "inspector/font-picker.slint";
 import { Meters } from "timeline/vu-meter.slint";
 import { Workspace } from "workspace/workspace.slint";
-import { Agent, AgentRail, AgentRow, AgentSidebar, AgentStarter, AgentStep } from "agent.slint";
-import { FileRow, Files, SidePanel, VideoCard } from "workspace/files-pane.slint";
+import { Agent, AgentRail, AgentRow, AgentSidebar, AgentStarter, AgentStep, AgentThread, AgentVoice } from "agent.slint";
+import { FileRow, Files, SidePanel, StoryBeat, StoryboardView, VideoCard } from "workspace/files-pane.slint";
 import {
     Backdrop,
     BackdropData,
@@ -118,10 +118,13 @@ export {
     Build,
     FileRow,
     Files,
+    StoryBeat,
     VideoCard,
     AgentRow,
     AgentStarter,
     AgentStep,
+    AgentThread,
+    AgentVoice,
     Curves,
     Fmt,
     Focus,
@@ -784,10 +787,19 @@ export component App inherits Window {
                     height: parent.height;
                 }
 
-                Workspace {
+                workspace := Workspace {
                     x: parent.side + 1px;
                     y: 0;
                     width: parent.width - self.x - (Files.panel-shown ? parent.panel + 1px : 0px);
+                    height: parent.height;
+                }
+
+                // An episode's storyboard, over the monitor and the
+                // timeline while it is open.
+                if Files.storyboard >= 0: StoryboardView {
+                    x: workspace.x;
+                    y: 0;
+                    width: workspace.width;
                     height: parent.height;
                 }
             }

@@ -15,6 +15,7 @@ import { Theme } from "../theme/theme.slint";
 import { Glyph, Icon } from "../icons.slint";
 import { Fmt, Payload } from "../util.slint";
 import { Editor } from "../editor.slint";
+import { Agent } from "../agent.slint";
 import { IconButton } from "../primitives/panel.slint";
 import { Tip } from "../primitives/tooltip.slint";
 import { Pane, PaneHeader, PaneScroll } from "pane.slint";
@@ -56,6 +57,25 @@ export struct VideoCard {
     thumbed: bool,
     /// It is the timeline open in the editor.
     current: bool,
+    /// Its episode's folder, relative to the project, when it has one,
+    /// and what that folder's brief.md says of it.
+    folder: string,
+    synopsis: string,
+    /// idea, storyboard, building, done or exported; empty when unsaid.
+    status: string,
+}
+
+/// One beat of an episode's storyboard, as its storyboard.md says it.
+export struct StoryBeat {
+    time: string,
+    title: string,
+    voice: string,
+    picture: string,
+    motion: string,
+    sound: string,
+    /// The picture's file, small, when the beat names one that is there.
+    image: image,
+    has-image: bool,
 }
 
 export global Files {
@@ -64,6 +84,12 @@ export global Files {
     in-out property <[VideoCard]> videos;
     /// The side panel is open, and which tab: 0 the videos, 1 the files.
     in-out property <bool> panel-shown: true;
+    /// The card whose storyboard is open in the centre, or -1, and the
+    /// storyboard's beats.
+    in-out property <int> storyboard: -1;
+    in-out property <[StoryBeat]> beats;
+    callback storyboard-opened(folder: string);
+    callback storyboard-closed();
     in-out property <int> panel-tab: 0;
     /// A folder's arrow, or a double-click on it.
     callback toggle(path: string);
@@ -356,13 +382,17 @@ component Card inherits Rectangle {
     /// The name is being typed over.
     property <bool> naming;
 
-    height: 112px;
+    // The picture's square and its margins, or the words when they run
+    // longer - a synopsis and a status under the name.
+    height: Math.max(112px, info.preferred-height);
     border-radius: Theme.r-lg;
     // Flat with a hairline edge, as Claude's cards are; the open one a
     // step up from the ground.
     background: root.video.current || touch.has-hover ? Theme.raised : transparent;
     border-width: 1px;
     border-color: root.video.current ? Theme.line-strong : Theme.line;
+
+    callback storyboard();
 
     touch := TouchArea {
         mouse-cursor: pointer;
@@ -417,7 +447,7 @@ component Card inherits Rectangle {
         }
     }
 
-    VerticalLayout {
+    info := VerticalLayout {
         x: 8px + root.slot + 12px;
         width: parent.width - self.x - 10px;
         padding-top: 12px;
@@ -474,6 +504,66 @@ component Card inherits Rectangle {
             color: Theme.fg-dim;
             font-size: Theme.fs-xs;
         }
+        if root.video.synopsis != "": Text {
+            text: root.video.synopsis;
+            color: Theme.fg-muted;
+            font-size: Theme.fs-sm;
+            wrap: word-wrap;
+            max-height: 34px;
+            overflow: elide;
+        }
+        if root.video.status != "": HorizontalLayout {
+            alignment: start;
+            padding-top: 2px;
+            Rectangle {
+                height: 18px;
+                width: chip.preferred-width + 14px;
+                border-radius: 9px;
+                background: root.video.status == "done" || root.video.status == "exported"
+                    ? Theme.accent-soft : Theme.field;
+                chip := Text {
+                    x: 7px;
+                    y: (parent.height - self.height) / 2;
+                    text: root.video.status == "idea" ? I18n.t("files.statusIdea")
+                        : root.video.status == "storyboard" ? I18n.t("files.statusStoryboard")
+                        : root.video.status == "building" ? I18n.t("files.statusBuilding")
+                        : root.video.status == "done" ? I18n.t("files.statusDone")
+                        : root.video.status == "exported" ? I18n.t("files.statusExported")
+                        : root.video.status;
+                    color: root.video.status == "done" || root.video.status == "exported"
+                        ? Theme.accent : Theme.fg-muted;
+                    font-size: Theme.fs-xs;
+                    font-weight: Theme.weight-title;
+                }
+            }
+        }
+    }
+
+    // The episode's storyboard, in the centre: a card with a folder has one
+    // to open, written yet or not.
+    if root.video.folder != "": Rectangle {
+        x: parent.width - self.width - 8px;
+        y: 8px;
+        width: 26px;
+        height: 26px;
+        border-radius: Theme.r;
+        background: board.has-hover ? Theme.field-hover : transparent;
+
+        Icon {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            glyph: Glyph.rows;
+            size: 14px;
+            tint: board.has-hover ? Theme.fg : Theme.fg-muted;
+        }
+        board := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.storyboard(); }
+        }
+        Tip {
+            text: I18n.t("files.openStoryboard");
+            active: board.has-hover;
+        }
     }
 }
 
@@ -492,7 +582,21 @@ export component VideoList inherits Rectangle {
             for video[index] in Files.videos: Card {
                 video: video;
                 index: index;
-                picked => { Editor.tab-selected(index); }
+                storyboard => {
+                    Editor.tab-selected(index);
+                    if (video.folder != "") {
+                        Agent.thread-picked(video.folder, video.name);
+                    }
+                    Files.storyboard = index;
+                    Files.storyboard-opened(video.folder);
+                }
+                picked => {
+                    Editor.tab-selected(index);
+                    // An episode's card opens its own conversation.
+                    if (video.folder != "") {
+                        Agent.thread-picked(video.folder, video.name);
+                    }
+                }
                 menu(x, y) => {
                     root.menu-index = index;
                     root.menu-x = self.absolute-position.x - root.absolute-position.x + x;
@@ -567,4 +671,283 @@ export component SidePanel inherits Rectangle {
 
     if Files.panel-tab == 0: VideoList {}
     if Files.panel-tab == 1: FileList {}
+}
+
+/// An episode's storyboard over the monitor and the timeline: its brief
+/// up top, its beats in order - when, what is seen, what is said, how it
+/// moves, what is heard - and the two things to do with it: have Claude
+/// write or revise it, or build the episode from it.
+export component StoryboardView inherits Rectangle {
+    property <VideoCard> video: Files.storyboard >= 0 && Files.storyboard < Files.videos.length
+        ? Files.videos[Files.storyboard] : Files.videos[0];
+
+    background: Theme.panel;
+
+    // A press anywhere stays here, not on the panes under it.
+    TouchArea {}
+
+    VerticalLayout {
+        padding: 24px;
+        padding-bottom: 0px;
+        spacing: 16px;
+
+        // ── the brief ──
+        HorizontalLayout {
+            spacing: 12px;
+
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 6px;
+                Text {
+                    text: root.video.name;
+                    color: Theme.fg;
+                    font-size: Theme.fs-xl + 4px;
+                    font-weight: Theme.weight-title;
+                    overflow: elide;
+                }
+                if root.video.synopsis != "": Text {
+                    text: root.video.synopsis;
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-lg;
+                    wrap: word-wrap;
+                }
+                Text {
+                    text: Fmt.short-duration(root.video.seconds) + "  ·  " + root.video.frame
+                        + "  ·  " + Files.beats.length + " " + I18n.t("files.beats");
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-sm;
+                }
+            }
+
+            VerticalLayout {
+                alignment: start;
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    // Claude writes it, or changes it, in the episode's own
+                    // conversation.
+                    Rectangle {
+                        width: ask-row.preferred-width + 24px;
+                        height: 32px;
+                        border-radius: Theme.r;
+                        background: ask.has-hover ? Theme.field-hover : Theme.field;
+                        ask-row := HorizontalLayout {
+                            x: 12px;
+                            spacing: 6px;
+                            VerticalLayout {
+                                alignment: center;
+                                Image {
+                                    width: 13px;
+                                    height: 13px;
+                                    source: @image-url("../logos/claude-color.svg");
+                                }
+                            }
+                            Text {
+                                text: Files.beats.length == 0 ? I18n.t("files.writeStoryboard")
+                                    : I18n.t("files.reviseStoryboard");
+                                color: Theme.fg;
+                                font-size: Theme.fs;
+                                vertical-alignment: center;
+                            }
+                        }
+                        ask := TouchArea {
+                            enabled: !Agent.busy;
+                            mouse-cursor: pointer;
+                            clicked => {
+                                if (Files.beats.length == 0) {
+                                    Agent.send(I18n.t("files.storyboardPrompt"));
+                                } else {
+                                    Agent.mention(I18n.t("files.revisePrefix"));
+                                }
+                            }
+                        }
+                    }
+
+                    // Build it: the plan becomes the timeline.
+                    if Files.beats.length > 0: Rectangle {
+                        width: build-row.preferred-width + 24px;
+                        height: 32px;
+                        border-radius: Theme.r;
+                        background: build.has-hover ? Theme.accent-hover : Theme.accent;
+                        opacity: Agent.busy ? 0.5 : 1;
+                        build-row := HorizontalLayout {
+                            x: 12px;
+                            spacing: 6px;
+                            VerticalLayout {
+                                alignment: center;
+                                Icon {
+                                    glyph: Glyph.play;
+                                    size: 12px;
+                                    tint: Theme.on-accent;
+                                }
+                            }
+                            Text {
+                                text: I18n.t("files.buildEpisode");
+                                color: Theme.on-accent;
+                                font-size: Theme.fs;
+                                font-weight: Theme.weight-title;
+                                vertical-alignment: center;
+                            }
+                        }
+                        build := TouchArea {
+                            enabled: !Agent.busy;
+                            mouse-cursor: pointer;
+                            clicked => {
+                                Agent.send(I18n.t("files.buildPrompt"));
+                                Files.storyboard = -1;
+                                Files.storyboard-closed();
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        width: 32px;
+                        height: 32px;
+                        border-radius: Theme.r;
+                        background: shut.has-hover ? Theme.field-hover : transparent;
+                        Icon {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            glyph: Glyph.close;
+                            size: 14px;
+                            tint: Theme.fg-muted;
+                        }
+                        shut := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                Files.storyboard = -1;
+                                Files.storyboard-closed();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Theme.line;
+        }
+
+        // ── the beats ──
+        if Files.beats.length == 0: VerticalLayout {
+            vertical-stretch: 1;
+            alignment: center;
+            spacing: 6px;
+            Text {
+                text: I18n.t("files.noStoryboard");
+                color: Theme.fg;
+                font-size: Theme.fs-lg;
+                horizontal-alignment: center;
+            }
+            Text {
+                text: I18n.t("files.noStoryboardNote");
+                color: Theme.fg-dim;
+                font-size: Theme.fs;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+
+        if Files.beats.length > 0: PaneScroll {
+            vertical-stretch: 1;
+
+            VerticalLayout {
+                padding-bottom: 24px;
+                spacing: 10px;
+
+                for beat[index] in Files.beats: Rectangle {
+                    height: Math.max(176px, words.preferred-height + 24px);
+                    border-radius: Theme.r-lg;
+                    border-width: 1px;
+                    border-color: Theme.line;
+
+                    // When, and which beat.
+                    VerticalLayout {
+                        x: 14px;
+                        y: 12px;
+                        width: 64px;
+                        spacing: 4px;
+                        alignment: start;
+                        Text {
+                            text: "\{index + 1}";
+                            color: Theme.fg-dim;
+                            font-size: Theme.fs-sm;
+                        }
+                        Text {
+                            text: beat.time;
+                            color: Theme.fg;
+                            font-size: Theme.fs-sm;
+                            font-weight: Theme.weight-title;
+                            wrap: word-wrap;
+                        }
+                    }
+
+                    // What is seen: the picture when it is made, the
+                    // words for it when it is not yet.
+                    Rectangle {
+                        x: 86px;
+                        y: 12px;
+                        width: 86px;
+                        height: 152px;
+                        border-radius: 8px;
+                        background: Theme.well;
+                        clip: true;
+
+                        if beat.has-image: Image {
+                            source: beat.image;
+                            image-fit: cover;
+                        }
+                        if !beat.has-image: Icon {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            glyph: Glyph.image;
+                            size: 18px;
+                            tint: Theme.fg-dim;
+                        }
+                    }
+
+                    words := VerticalLayout {
+                        x: 188px;
+                        y: 12px;
+                        width: parent.width - self.x - 14px;
+                        spacing: 6px;
+                        alignment: start;
+
+                        if beat.title != "": Text {
+                            text: beat.title;
+                            color: Theme.fg;
+                            font-size: Theme.fs-lg;
+                            font-weight: Theme.weight-title;
+                            wrap: word-wrap;
+                        }
+                        if beat.voice != "": Text {
+                            text: beat.voice;
+                            color: Theme.fg;
+                            font-size: Theme.fs-lg;
+                            wrap: word-wrap;
+                        }
+                        if beat.picture != "": Text {
+                            text: I18n.t("files.beatPicture") + "  " + beat.picture;
+                            color: Theme.fg-muted;
+                            font-size: Theme.fs-sm;
+                            wrap: word-wrap;
+                        }
+                        if beat.motion != "": Text {
+                            text: I18n.t("files.beatMotion") + "  " + beat.motion;
+                            color: Theme.fg-muted;
+                            font-size: Theme.fs-sm;
+                            wrap: word-wrap;
+                        }
+                        if beat.sound != "": Text {
+                            text: I18n.t("files.beatSound") + "  " + beat.sound;
+                            color: Theme.fg-muted;
+                            font-size: Theme.fs-sm;
+                            wrap: word-wrap;
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

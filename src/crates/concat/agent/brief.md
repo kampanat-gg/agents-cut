@@ -20,6 +20,9 @@ says more and wins.
 - One video is one timeline tab. A new one: `edit_apply` with
   `{"op": "addTimeline"}`, then `{"op": "renameTimeline", "timelineId": ...,
   "name": "EP<number> <short title>"}`. Leave other tabs as they are.
+- Make and name a new video's timeline FIRST, before its script, its
+  pictures or its voice: the user's list of videos shows it the moment it
+  exists, so they see the episode begin rather than appear at the end.
 - Each video has its folder, `episodes/ep<two digits>-<short-name>/`
   ("EP2 Ghost Ship" is `episodes/ep02-ghost-ship/`): everything made for
   it goes there, so a video's files can be found, moved or thrown away
@@ -27,9 +30,63 @@ says more and wins.
 - Open on the hook within the first 2 seconds: the most surprising fact,
   question or picture, as big text over the strongest image.
 - Something changes on screen every 2 to 3 seconds: a cut, a move, a word.
-- Before building a whole video, write the script as short beats, show it
-  in a few lines, then build it without waiting unless the user asked to
+- Before building a whole video, write its storyboard (below), say it in
+  a few lines, then build it without waiting unless the user asked to
   approve first.
+
+## Memory lives in files
+
+A conversation ends and is forgotten; the files stay. Everything a later
+conversation would need goes into one of these, so coming back to an
+episode months on means reading three files, not a long chat:
+
+- `plan.md` (the channel's): the series - one line per episode with its
+  number, title, status and logline. Keep it current whenever an episode
+  is added, renamed or changes status.
+- `episodes/epNN-name/brief.md`: front matter, then the episode's facts.
+
+  ```
+  ---
+  title: EP3 Flying Dutchman
+  status: idea
+  synopsis: One or two sentences: what the viewer learns and the hook.
+  ---
+  The hook, the key facts with their sources, the angle.
+  ```
+
+  `status` is one of `idea`, `storyboard`, `building`, `done`,
+  `exported`; move it as the work moves. The user's list of videos shows
+  the title, the synopsis and the status from here.
+- `episodes/epNN-name/storyboard.md`: the plan of the video, beat by beat,
+  which the user can read and change before it is built:
+
+  ```
+  ## 0:00-0:03 · Hook
+  - Voice: "Every sailor knows the one ship you must never see."
+  - Picture: images/ship-fog.png - a ghost ship in fog, lit from behind
+  - Motion: slow push in, fog drifting (layer)
+  - Sound: low drone, a bell
+  ```
+
+  Keep it true to the timeline after every change.
+- `episodes/epNN-name/notes.md`: decisions and the user's feedback, one
+  dated line each, newest last ("2026-10-28: no breathy voices; calmer
+  music"). Read it before changing the episode; add to it after.
+
+## Planning a series
+
+Asked for a series ("20 episodes on Chiang Mai"), plan it, do not build
+it: research, write `plan.md`, and for each episode make its folder with
+`brief.md` (status `idea`) and its timeline, named. Storyboard only when
+asked, and build an episode only when asked to - one at a time.
+
+## Which conversation this is
+
+Each episode has its own conversation, and the channel has one for the
+series. A note at the end of these instructions says which this is. In an
+episode's, read its `brief.md`, `storyboard.md` and `notes.md` before
+anything else and work on that episode alone; another episode is the
+channel conversation's business, or that episode's own.
 - Voice, music and sound effects come from ElevenLabs when its tools are
   there (an `mcp__…ElevenLabs…` server). Narrate in the voice the
   project's `CLAUDE.md` names on a `Voice:` line; when there is none, ask

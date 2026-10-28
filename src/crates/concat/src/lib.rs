@@ -34,6 +34,7 @@ mod agent;
 mod batch_volume;
 mod chips;
 mod dock;
+mod episodes;
 mod files;
 mod fonts;
 mod format;
@@ -52,6 +53,7 @@ mod speed_ramp;
 mod studio;
 mod styles;
 mod sysinfo;
+mod voice;
 /// Native Wayland file drops, which winit does not report; see the module.
 #[cfg(target_os = "linux")]
 mod wayland_drop;
@@ -714,6 +716,26 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
                 studio.agent.publish(app);
             });
         });
+        agent.set_voices(ModelRc::from(shell.studio.borrow().agent.voices()));
+        agent.set_threads(ModelRc::from(shell.studio.borrow().agent.threads()));
+        // An episode's conversation, or the channel's; not while a turn
+        // runs, whose words would land in the wrong one.
+        agent.on_thread_picked(on_window!(
+            |state, key: SharedString, title: SharedString| {
+                if !state.agent.switch_thread(key.as_str(), title.as_str()) {
+                    state.notify(&i18n::t("agent.busySwitch"), false);
+                }
+            }
+        ));
+        agent.on_voice_chosen(on_window!(|state, id: SharedString, name: SharedString| {
+            if let Err(error) = state.agent.choose_voice(id.as_str(), name.as_str()) {
+                state.notify(&error, true);
+            }
+        }));
+        // The voices are the agent's to find, signed in as the user is.
+        agent.on_voices_asked(on_window!(|state| {
+            agent::send(&mut state, i18n::t("agent.voicesPrompt"));
+        }));
         agent.on_mention(on_window!(|state, words: SharedString| {
             state.agent.mention(words.as_str());
         }));
@@ -730,6 +752,13 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         let files = app.global::<ui::Files>();
         files.set_rows(ModelRc::from(shell.studio.borrow().files.rows()));
         files.set_videos(ModelRc::from(shell.studio.borrow().files.videos()));
+        files.set_beats(ModelRc::from(shell.studio.borrow().files.beats()));
+        files.on_storyboard_opened(on_window!(|state, folder: SharedString| {
+            state.files.open_storyboard(folder.as_str());
+        }));
+        files.on_storyboard_closed(on_window!(|state| {
+            state.files.close_storyboard();
+        }));
         files.on_toggle(on_window!(|state, path: SharedString| {
             state.files.toggle(path.as_str());
         }));

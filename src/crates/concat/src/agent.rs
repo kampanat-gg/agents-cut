@@ -37,7 +37,8 @@ use slint::{ComponentHandle, Model, VecModel};
 use crate::host::Shell;
 use crate::i18n::{t, tf};
 use crate::studio::Studio;
-use crate::ui::{Agent, AgentRow, AgentStarter, AgentStep, App};
+use crate::ui::{Agent, AgentRow, AgentStarter, AgentStep, AgentThread, AgentVoice, App};
+use crate::voice::{self, Voice};
 
 /// The tools the agent may call: the editor's, and of the machine's only
 /// `codex exec`, for pictures, and reading inside the project's folder,
@@ -190,6 +191,38 @@ struct Step {
 }
 
 /// The tool calls between two things the agent said.
+/// A conversation as it is kept on disk; see [`Chat::save`].
+#[derive(Default, serde::Serialize, serde::Deserialize)]
+struct SavedThread {
+    session: Option<String>,
+    rows: Vec<SavedRow>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SavedRow {
+    role: String,
+    text: String,
+    #[serde(default)]
+    detail: String,
+    #[serde(default)]
+    state: i32,
+    #[serde(default)]
+    steps: Vec<SavedStep>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SavedStep {
+    label: String,
+    #[serde(default)]
+    detail: String,
+    #[serde(default)]
+    brand: String,
+    #[serde(default)]
+    state: i32,
+    #[serde(default)]
+    took_ms: Option<u64>,
+}
+
 struct Group {
     /// The row it is drawn in.
     row: usize,
@@ -233,6 +266,19 @@ pub struct Chat {
     attached_token: i32,
     /// Fires once a turn has been quiet for [`QUIET`].
     watch: slint::Timer,
+    /// The open project's folder, which its voice is read from and
+    /// written to.
+    folder: PathBuf,
+    /// The channel's narration voice, from its `CLAUDE.md`, and the ones
+    /// on offer, from its `voices.json`.
+    voice: Option<Voice>,
+    voices: Rc<VecModel<AgentVoice>>,
+    /// Which conversation is on screen: "" the channel's, or an episode's
+    /// folder ("episodes/ep03-flying-dutchman"), and what it is called.
+    thread: String,
+    thread_title: String,
+    /// The conversations to switch between, for the sidebar's header.
+    threads: Rc<VecModel<AgentThread>>,
 }
 
 impl Default for Chat {
@@ -254,6 +300,12 @@ impl Default for Chat {
             attached: String::new(),
             attached_token: 0,
             watch: slint::Timer::default(),
+            folder: PathBuf::new(),
+            voice: None,
+            voices: Rc::new(VecModel::default()),
+            thread: String::new(),
+            thread_title: String::new(),
+            threads: Rc::new(VecModel::default()),
         }
     }
 }
@@ -277,7 +329,225 @@ impl Chat {
 
     /// Shows the buttons of the style the project at `folder` was made
     /// with, in the interface's language; none for a project without one.
+    /// The voices on offer, handed to the sidebar once.
+    pub fn voices(&self) -> Rc<VecModel<AgentVoice>> {
+        Rc::clone(&self.voices)
+    }
+
+    /// Reads the channel's voice and the voices on offer again: after a
+    /// project opens, and after a turn, which may have set either.
+    fn load_voice(&mut self) {
+        self.voice = voice::of_project(&self.folder);
+        let current = self.voice.as_ref().map(|voice| voice.id.clone());
+        let voices: Vec<AgentVoice> = voice::choices(&self.folder)
+            .into_iter()
+            .map(|voice| AgentVoice {
+                current: current.as_deref() == Some(voice.id.as_str()),
+                name: voice.name.into(),
+                id: voice.id.into(),
+                mine: voice.mine,
+                note: voice.note.into(),
+            })
+            .collect();
+        self.voices.set_vec(voices);
+    }
+
+    /// Makes `id` the channel's voice, under `name` when there is one.
+    pub fn choose_voice(&mut self, id: &str, name: &str) -> Result<(), String> {
+        let id = id.trim();
+        if id.is_empty() {
+            return Ok(());
+        }
+        voice::set(
+            &self.folder,
+            &Voice {
+                name: name.trim().to_owned(),
+                id: id.to_owned(),
+                ..Voice::default()
+            },
+        )?;
+        self.load_voice();
+        Ok(())
+    }
+
+    /// The conversations to switch between, handed to the sidebar once.
+    pub fn threads(&self) -> Rc<VecModel<AgentThread>> {
+        Rc::clone(&self.threads)
+    }
+
+    /// Lists the conversations: the channel's, then each episode's that
+    /// has a folder, by its folder and its timeline's name.
+    pub fn list_threads(&self, episodes: Vec<(String, String)>) {
+        let mut threads = vec![AgentThread {
+            key: "".into(),
+            title: t("agent.channelChat").into(),
+            current: self.thread.is_empty(),
+        }];
+        threads.extend(episodes.into_iter().map(|(key, title)| AgentThread {
+            current: key == self.thread,
+            key: key.into(),
+            title: title.into(),
+        }));
+        crate::studio::sync(&self.threads, threads);
+    }
+
+    /// Puts the conversation `key` on screen - "" the channel's, or an
+    /// episode's folder - after saving the one there. Not while a turn
+    /// runs: its words would land in the wrong conversation.
+    pub fn switch_thread(&mut self, key: &str, title: &str) -> bool {
+        if self.busy() {
+            return false;
+        }
+        if key == self.thread {
+            return true;
+        }
+        self.save();
+        self.thread = key.to_owned();
+        self.thread_title = if key.is_empty() {
+            t("agent.channelChat")
+        } else {
+            title.to_owned()
+        };
+        self.restore();
+        true
+    }
+
+    /// The note that tells a turn which conversation it is in.
+    fn thread_note(&self) -> String {
+        if self.thread.is_empty() {
+            t("agent.channelNote")
+        } else {
+            tf("agent.episodeNote", &[&self.thread_title, &self.thread])
+        }
+    }
+
+    /// Where the conversation on screen is kept: the project's hidden
+    /// `.concat/chats/`, one file a conversation.
+    fn saved_path(&self) -> Option<PathBuf> {
+        if self.folder.as_os_str().is_empty() {
+            return None;
+        }
+        let name = if self.thread.is_empty() {
+            "channel".to_owned()
+        } else {
+            Path::new(&self.thread)
+                .file_name()?
+                .to_string_lossy()
+                .into_owned()
+        };
+        Some(
+            self.folder
+                .join(".concat")
+                .join("chats")
+                .join(format!("{name}.json")),
+        )
+    }
+
+    /// Writes the conversation on screen - its Claude session and its
+    /// rows - so it comes back when its episode is opened again, in this
+    /// run or a later one.
+    fn save(&self) {
+        let Some(path) = self.saved_path() else {
+            return;
+        };
+        let rows: Vec<SavedRow> = (0..self.rows.row_count())
+            .filter_map(|index| self.rows.row_data(index).map(|row| (index, row)))
+            .map(|(index, row)| {
+                let steps = self
+                    .groups
+                    .iter()
+                    .find(|group| group.row == index)
+                    .map(|group| {
+                        group
+                            .steps
+                            .iter()
+                            .map(|step| SavedStep {
+                                label: step.label.clone(),
+                                detail: step.detail.clone(),
+                                brand: step.brand.to_owned(),
+                                state: step.state.max(1),
+                                took_ms: step.took.map(|took| took.as_millis() as u64),
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                SavedRow {
+                    role: row.role.to_string(),
+                    text: row.text.to_string(),
+                    detail: row.detail.to_string(),
+                    state: row.state,
+                    steps,
+                }
+            })
+            .collect();
+        let saved = SavedThread {
+            session: self.session.clone(),
+            rows,
+        };
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(text) = serde_json::to_string(&saved)
+            && let Err(error) = std::fs::write(&path, text)
+        {
+            log::warn!("agent: could not save {}: {error}", path.display());
+        }
+    }
+
+    /// Reads the conversation on screen back from where [`Chat::save`]
+    /// put it; an empty one when it was never saved.
+    fn restore(&mut self) {
+        self.rows.set_vec(Vec::new());
+        self.groups.clear();
+        self.tools.clear();
+        self.session = None;
+        let saved: SavedThread = self
+            .saved_path()
+            .and_then(|path| std::fs::read_to_string(path).ok())
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default();
+        self.session = saved.session;
+        for row in saved.rows {
+            if row.role == "steps" {
+                let at = self.push("steps", "", "", 1);
+                let now = Instant::now();
+                self.groups.push(Group {
+                    row: at,
+                    steps: row
+                        .steps
+                        .into_iter()
+                        .map(|step| Step {
+                            label: step.label,
+                            detail: step.detail,
+                            brand: match step.brand.as_str() {
+                                "claude" => "claude",
+                                "codex" => "codex",
+                                "elevenlabs" => "elevenlabs",
+                                _ => "",
+                            },
+                            state: step.state,
+                            began: now,
+                            took: step.took_ms.map(Duration::from_millis),
+                        })
+                        .collect(),
+                    began: now,
+                    live: false,
+                    open: false,
+                });
+                self.draw_group(self.groups.len() - 1);
+            } else {
+                self.push(&row.role, &row.text, &row.detail, row.state);
+            }
+        }
+    }
+
     pub fn load_style(&mut self, folder: &Path) {
+        self.folder = folder.to_path_buf();
+        self.load_voice();
+        // The channel's conversation, as it was left.
+        self.thread = String::new();
+        self.thread_title = t("agent.channelChat");
+        self.restore();
         let style = crate::styles::of_project(folder);
         let starters: Vec<AgentStarter> = style
             .map(|style| {
@@ -342,6 +612,21 @@ impl Chat {
     /// Writes what the sidebar shows that is not a row.
     pub fn publish(&self, app: &App) {
         let agent = app.global::<Agent>();
+        agent.set_thread_title(self.thread_title.as_str().into());
+        agent.set_voice_set(self.voice.is_some());
+        agent.set_voice_name(
+            self.voice
+                .as_ref()
+                .map(|voice| {
+                    if voice.name.is_empty() {
+                        voice.id.as_str()
+                    } else {
+                        voice.name.as_str()
+                    }
+                })
+                .unwrap_or_default()
+                .into(),
+        );
         agent.set_busy(self.busy());
         agent.set_shown(self.shown);
         agent.set_model(self.model as i32);
@@ -533,6 +818,7 @@ impl Chat {
         self.rows.set_vec(Vec::new());
         self.groups.clear();
         self.session = None;
+        self.save();
     }
 
     /// Says so when the turn `epoch` is still running and has said nothing.
@@ -600,6 +886,7 @@ impl Chat {
             }
             Said::Exited { ok, stderr } => {
                 let finished = self.turn.take().is_some_and(|turn| turn.finished);
+                self.load_voice();
                 self.epoch += 1;
                 self.tick.stop();
                 self.tools.clear();
@@ -608,6 +895,8 @@ impl Chat {
                     let why = last_line(&stderr).unwrap_or("exit");
                     self.push("error", &tf("agent.failed", &[&why]), "", 0);
                 }
+                // The conversation as it now stands, kept for its episode.
+                self.save();
             }
         }
     }
@@ -685,6 +974,8 @@ fn start(studio: &mut Studio, text: &str) -> Result<(), String> {
         command.args(["--tools", TOOLS]);
     }
     command.arg("--allowedTools").args(&allowed);
+    brief.push_str("\n\n");
+    brief.push_str(&studio.agent.thread_note());
     command.arg("--append-system-prompt").arg(brief);
     let (model, effort) = (MODELS[studio.agent.model].0, EFFORTS[studio.agent.effort]);
     if studio.agent.picked {
