@@ -8773,6 +8773,7 @@ impl Studio {
                     std::path::PathBuf::from(self.session.as_ref().map_or("", |s| s.path()));
                 self.agent.load_style(&folder);
                 self.files.load(&folder);
+                self.open_video_chat();
                 // The relink dialog belongs to the project that opened it;
                 // this project's own check follows below.
                 self.relink = Default::default();

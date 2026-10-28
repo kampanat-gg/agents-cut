@@ -648,6 +648,27 @@ impl Studio {
         self.follow_video();
     }
 
+    /// The conversation a project opens on: the episode's of the video on
+    /// screen when it is one, the channel's otherwise. Nothing is started
+    /// or renamed: opening a project only shows what is there.
+    pub fn open_video_chat(&mut self) {
+        let name = {
+            let doc = self.project();
+            let Some(timeline) = doc
+                .timelines
+                .iter()
+                .find(|timeline| timeline.id == doc.active_timeline_id)
+            else {
+                return;
+            };
+            timeline.name.clone()
+        };
+        if let Some(folder) = self.files.episode(&name).0 {
+            self.agent.switch_thread(&folder, &name);
+            self.publish_videos();
+        }
+    }
+
     /// Puts the video on screen's conversation in the sidebar: its
     /// episode's, after starting it as the next episode - its number on
     /// its name, its folder and brief - when it is not one yet. A project
