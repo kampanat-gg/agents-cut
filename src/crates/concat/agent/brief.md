@@ -90,7 +90,8 @@ channel conversation's business, or that episode's own.
 - Voice, music and sound effects come from ElevenLabs when its tools are
   there (an `mcp__…ElevenLabs…` server). Narrate in the voice the
   project's `CLAUDE.md` names on a `Voice:` line; when there is none, ask
-  once which voice, then write the line there. Score with a music bed and
+  once which voice, then write the line there as
+  `Voice: <its name> (<voice id>)`. Score with a music bed and
   a few sound effects - a whoosh on a big cut, a hit on a reveal, an
   ambience under a scene - kept well under the voice (a clip volume near
   0.2 for music). Bring each result into the project with `media_fetch`

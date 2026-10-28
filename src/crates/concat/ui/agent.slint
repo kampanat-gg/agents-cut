@@ -104,6 +104,12 @@ export global Agent {
     in-out property <string> thread-title;
     in-out property <[AgentThread]> threads;
     callback thread-picked(key: string, title: string);
+    /// The sidebar's width, which its edge drags.
+    in-out property <length> width: 340px;
+    /// Codex is installed and signed in; an ElevenLabs connector is
+    /// connected. The box's status row shows both.
+    in-out property <bool> codex-ready;
+    in-out property <bool> elevenlabs-ready;
     /// The channel's narration voice: set or not, and what it is called.
     in-out property <bool> voice-set;
     in-out property <string> voice-name;
@@ -215,26 +221,40 @@ component VoiceChip inherits Rectangle {
     property <length> list-h: Agent.voices.length > 0 ? root.shown * root.row-h + 8px : 0px;
     property <length> menu-h: 30px + root.list-h + 38px + 44px + 12px;
 
-    width: 30px;
-    height: 30px;
-    border-radius: 15px;
-    background: touch.has-hover ? Theme.field-hover : transparent;
+    width: pill.preferred-width + 14px;
+    height: 22px;
+    border-radius: 11px;
+    background: touch.has-hover ? Theme.sidebar-hover : transparent;
 
-    Icon {
-        x: (parent.width - self.width) / 2;
-        y: (parent.height - self.height) / 2;
-        glyph: Glyph.mic;
-        size: 14px;
-        tint: Agent.voice-set ? Theme.fg-muted : Theme.fg;
-    }
-    // Not chosen yet: a dot, the way an unread thing is marked.
-    if !Agent.voice-set: Rectangle {
-        x: parent.width - 10px;
-        y: 4px;
-        width: 7px;
-        height: 7px;
-        border-radius: 3.5px;
-        background: Theme.accent;
+    pill := HorizontalLayout {
+        x: 7px;
+        spacing: 5px;
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                glyph: Glyph.mic;
+                size: 12px;
+                tint: Agent.voice-set ? Theme.fg-muted : Theme.fg;
+            }
+        }
+        Text {
+            text: Agent.voice-set ? Agent.voice-name : I18n.t("agent.chooseVoice");
+            color: Agent.voice-set ? Theme.fg-muted : Theme.fg;
+            font-size: Theme.fs-xs;
+            vertical-alignment: center;
+            overflow: elide;
+            max-width: 96px;
+        }
+        // Not chosen yet: a dot, the way an unread thing is marked.
+        if !Agent.voice-set: VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 6px;
+                height: 6px;
+                border-radius: 3px;
+                background: Theme.accent;
+            }
+        }
     }
 
     touch := TouchArea {
@@ -248,7 +268,7 @@ component VoiceChip inherits Rectangle {
     }
 
     menu := PopupWindow {
-        x: -120px;
+        x: 0;
         y: -(root.menu-h + 6px);
         width: 280px;
         height: root.menu-h;
@@ -405,6 +425,62 @@ component VoiceChip inherits Rectangle {
                 }
             }
         }
+    }
+}
+
+/// A service the agent reaches, under the box: its mark, its name, and a
+/// dot that is green once it is connected.
+component Service inherits Rectangle {
+    in property <string> brand;
+    in property <string> name;
+    in property <bool> ready;
+    in property <string> help;
+
+    width: row.preferred-width + 14px;
+    height: 22px;
+    border-radius: 11px;
+    background: touch.has-hover ? Theme.sidebar-hover : transparent;
+
+    row := HorizontalLayout {
+        x: 7px;
+        spacing: 6px;
+        // The mark, with the dot on its corner as a presence is shown.
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 14px;
+                height: 14px;
+                Brand {
+                    x: 0;
+                    y: 0;
+                    brand: root.brand;
+                    size: 12px;
+                    tint: Theme.fg-muted;
+                }
+                Rectangle {
+                    x: parent.width - 6px;
+                    y: parent.height - 6px;
+                    width: 7px;
+                    height: 7px;
+                    border-radius: 3.5px;
+                    border-width: 1.5px;
+                    border-color: Theme.sidebar;
+                    background: root.ready ? Theme.green : Theme.fg-dim;
+                }
+            }
+        }
+        Text {
+            text: root.name;
+            color: root.ready ? Theme.fg-muted : Theme.fg-dim;
+            font-size: Theme.fs-xs;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {}
+    Tip {
+        text: root.help;
+        active: touch.has-hover;
     }
 }
 
@@ -1030,13 +1106,13 @@ export component AgentSidebar inherits Rectangle {
 
         y: root.height - self.height;
         width: root.width;
-        height: self.words + 42px + 38px;
+        height: self.words + 42px + 38px + 26px;
 
         Rectangle {
             x: 10px;
             y: 6px;
             width: parent.width - 20px;
-            height: parent.height - 22px;
+            height: parent.height - 22px - 26px;
             background: Theme.field;
             border-radius: 14px;
             border-width: 1px;
@@ -1086,9 +1162,9 @@ export component AgentSidebar inherits Rectangle {
             HorizontalLayout {
                 x: 8px;
                 y: parent.height - 38px;
-                width: parent.width - 16px;
+                width: parent.width - 18px;
                 height: 30px;
-                spacing: 4px;
+                spacing: 6px;
 
                 RoundButton {
                     glyph: Glyph.plus;
@@ -1109,11 +1185,6 @@ export component AgentSidebar inherits Rectangle {
                     picked(index) => { Agent.effort-picked(index); }
                 }
 
-                VerticalLayout {
-                    alignment: center;
-                    VoiceChip {}
-                }
-
                 Rectangle { horizontal-stretch: 1; }
 
                 RoundButton {
@@ -1129,6 +1200,31 @@ export component AgentSidebar inherits Rectangle {
                         }
                     }
                 }
+            }
+        }
+
+        // What the agent reaches besides the editor: the narration voice,
+        // Codex for pictures and ElevenLabs for sound, each with whether
+        // it is ready.
+        HorizontalLayout {
+            x: 12px;
+            y: parent.height - 30px;
+            height: 22px;
+            spacing: 4px;
+            alignment: start;
+
+            VoiceChip {}
+            Service {
+                brand: "codex";
+                name: "Codex";
+                ready: Agent.codex-ready;
+                help: Agent.codex-ready ? I18n.t("agent.codexReady") : I18n.t("agent.codexMissing");
+            }
+            Service {
+                brand: "elevenlabs";
+                name: "ElevenLabs";
+                ready: Agent.elevenlabs-ready;
+                help: Agent.elevenlabs-ready ? I18n.t("agent.elevenReady") : I18n.t("agent.elevenMissing");
             }
         }
     }

@@ -59,14 +59,37 @@ const TOOLS: &str = "Read,Glob,Grep,Write,Edit,WebSearch,WebFetch";
 /// few seconds of health checks), and empty until then.
 static VOICE_SERVERS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
-/// Starts reading which voice servers the user's Claude Code has.
+/// Codex is installed and signed in: what the box's status row shows, read
+/// in the background with the servers.
+static CODEX_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Starts reading which voice servers the user's Claude Code has, and
+/// whether Codex is signed in; the sidebar is drawn again with the answer.
 pub fn discover_servers() {
-    let Some(claude) = find("claude") else {
-        return;
-    };
+    let claude = find("claude");
+    let codex = find("codex");
     let _ = std::thread::Builder::new()
         .name("agent-servers".to_owned())
         .spawn(move || {
+            if let Some(codex) = codex {
+                let signed_in = Command::new(&codex)
+                    .args(["login", "status"])
+                    .env("PATH", search_path(&codex))
+                    .stdin(Stdio::null())
+                    .output()
+                    .is_ok_and(|out| out.status.success());
+                CODEX_READY.store(signed_in, std::sync::atomic::Ordering::Relaxed);
+                log::info!("agent: codex signed in: {signed_in}");
+            }
+            let republish = || {
+                let _ = slint::invoke_from_event_loop(|| {
+                    Shell::with(|shell, app| shell.studio.borrow().agent.publish(&app));
+                });
+            };
+            let Some(claude) = claude else {
+                republish();
+                return;
+            };
             let listed = Command::new(&claude)
                 .args(["mcp", "list"])
                 .env("PATH", search_path(&claude))
@@ -80,6 +103,7 @@ pub fn discover_servers() {
             if let Ok(mut servers) = VOICE_SERVERS.lock() {
                 *servers = found;
             }
+            republish();
         });
 }
 
@@ -613,15 +637,17 @@ impl Chat {
     pub fn publish(&self, app: &App) {
         let agent = app.global::<Agent>();
         agent.set_thread_title(self.thread_title.as_str().into());
+        agent.set_codex_ready(CODEX_READY.load(std::sync::atomic::Ordering::Relaxed));
+        agent.set_elevenlabs_ready(!voice_servers().is_empty());
         agent.set_voice_set(self.voice.is_some());
         agent.set_voice_name(
             self.voice
                 .as_ref()
                 .map(|voice| {
                     if voice.name.is_empty() {
-                        voice.id.as_str()
+                        format!("{}…", voice.id.chars().take(6).collect::<String>())
                     } else {
-                        voice.name.as_str()
+                        voice.name.clone()
                     }
                 })
                 .unwrap_or_default()

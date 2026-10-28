@@ -84,6 +84,8 @@ export global Files {
     in-out property <[VideoCard]> videos;
     /// The side panel is open, and which tab: 0 the videos, 1 the files.
     in-out property <bool> panel-shown: true;
+    /// The side panel's width, which its edge drags.
+    in-out property <length> panel-width: 300px;
     /// The card whose storyboard is open in the centre, or -1, and the
     /// storyboard's beats.
     in-out property <int> storyboard: -1;

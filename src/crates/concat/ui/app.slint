@@ -195,6 +195,38 @@ export {
     VoiceCardData,
     NewVoiceData,
 }
+// A column's inner edge, to drag: a resize cursor over a few pixels of the
+// hairline, and the distance moved since the press.
+component EdgeHandle inherits Rectangle {
+    in-out property <length> origin;
+    callback pressed();
+    callback moved(delta: length);
+
+    property <length> start;
+
+    Rectangle {
+        x: (parent.width - 2px) / 2;
+        width: 2px;
+        background: Theme.accent;
+        opacity: touch.has-hover || touch.pressed ? 1 : 0;
+        animate opacity { duration: 100ms; }
+    }
+    touch := TouchArea {
+        mouse-cursor: ew-resize;
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down) {
+                root.start = self.absolute-position.x + self.mouse-x;
+                root.pressed();
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                root.moved(self.absolute-position.x + self.mouse-x - root.start);
+            }
+        }
+    }
+}
+
 export component App inherits Window {
     title: "Concat";
     // The taskbar's and Alt-Tab's picture on Windows, and the window
@@ -693,8 +725,8 @@ export component App inherits Window {
                 deep: root.on-start;
                 project-name: root.project-name;
                 status: root.project-status;
-                side: root.on-start ? 0px : Agent.shown ? 320px : 44px;
-                panel: root.on-start || !Files.panel-shown ? 0px : 300px;
+                side: root.on-start ? 0px : Agent.shown ? Agent.width : 44px;
+                panel: root.on-start || !Files.panel-shown ? 0px : Files.panel-width;
 
                 menu: root.open-menu;
                 keyboard-menu: root.keyboard-menu;
@@ -752,12 +784,12 @@ export component App inherits Window {
                 // Placed by hand: in a row layout the sidebar's maximum
                 // height would cap the workspace's. Flush to the window's
                 // edges, a hairline from the work beside it.
-                property <length> side: Agent.shown ? 320px : 44px;
+                property <length> side: Agent.shown ? Agent.width : 44px;
 
                 if Agent.shown: AgentSidebar {
                     x: 0;
                     y: 0;
-                    width: 320px;
+                    width: Agent.width;
                     height: parent.height;
                 }
                 if !Agent.shown: AgentRail {
@@ -774,7 +806,7 @@ export component App inherits Window {
 
                 // The side panel down the right, as the sidebar is down the
                 // left: the project's videos and files.
-                property <length> panel: Files.panel-shown ? 300px : 0px;
+                property <length> panel: Files.panel-shown ? Files.panel-width : 0px;
                 if Files.panel-shown: Rectangle {
                     x: parent.width - parent.panel - 1px;
                     width: 1px;
@@ -792,6 +824,27 @@ export component App inherits Window {
                     y: 0;
                     width: parent.width - self.x - (Files.panel-shown ? parent.panel + 1px : 0px);
                     height: parent.height;
+                }
+
+                // The two columns' inner edges drag to resize them, within
+                // what leaves the monitor and the timeline room to work.
+                if Agent.shown: EdgeHandle {
+                    x: parent.side - 3px;
+                    width: 7px;
+                    height: parent.height;
+                    moved(delta) => {
+                        Agent.width = Math.max(260px, Math.min(560px, self.origin + delta));
+                    }
+                    pressed => { self.origin = Agent.width; }
+                }
+                if Files.panel-shown: EdgeHandle {
+                    x: parent.width - parent.panel - 4px;
+                    width: 7px;
+                    height: parent.height;
+                    moved(delta) => {
+                        Files.panel-width = Math.max(240px, Math.min(520px, self.origin - delta));
+                    }
+                    pressed => { self.origin = Files.panel-width; }
                 }
 
                 // An episode's storyboard, over the monitor and the

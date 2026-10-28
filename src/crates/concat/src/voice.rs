@@ -42,7 +42,11 @@ pub fn of_project(folder: &Path) -> Option<Voice> {
     parse(&text)
 }
 
-/// The `Voice:` line's voice: "Voice: Duang (2hqnj6...)", or the id alone.
+/// The `Voice:` line's voice. Written by the picker as "Voice: Duang
+/// (2hqnj6...)", but the agent words it its own way too - "Voice:
+/// ElevenLabs 2hqnj6... (the user's own voice), model eleven_v4" - so the
+/// id is whatever word looks like one, and the name what is in brackets,
+/// or else the words before the id.
 fn parse(text: &str) -> Option<Voice> {
     let line = text
         .lines()
@@ -52,15 +56,29 @@ fn parse(text: &str) -> Option<Voice> {
                 .strip_prefix("Voice:")
         })?
         .trim();
-    if line.is_empty() {
-        return None;
-    }
-    let (name, id) = match line.rsplit_once('(') {
-        Some((name, id)) if id.ends_with(')') => (name.trim(), id.trim_end_matches(')').trim()),
-        _ => ("", line),
+    let looks_like_id = |word: &str| {
+        (16..=32).contains(&word.len()) && word.chars().all(|c| c.is_ascii_alphanumeric())
     };
+    let id = line
+        .split(|c: char| c.is_whitespace() || "(),;:".contains(c))
+        .find(|word| looks_like_id(word))?;
+    let bracketed = line
+        .split_once('(')
+        .and_then(|(_, rest)| rest.split_once(')'))
+        .map(|(inside, _)| inside.trim())
+        .filter(|inside| *inside != id && !inside.is_empty());
+    let before = line
+        .split_once(id)
+        .map(|(before, _)| {
+            before
+                .trim_end_matches(|c: char| c.is_whitespace() || "(,;:".contains(c))
+                .trim()
+                .trim_start_matches("ElevenLabs")
+                .trim()
+        })
+        .filter(|before| !before.is_empty());
     Some(Voice {
-        name: name.to_owned(),
+        name: bracketed.or(before).unwrap_or_default().to_owned(),
         id: id.to_owned(),
         ..Voice::default()
     })
@@ -133,9 +151,14 @@ mod tests {
         let named = parse("# Sea Legends\n\nVoice: Duang (2hqnj6qelkp9E3ega0Xy)\n");
         assert_eq!(named.as_ref().map(|v| v.name.as_str()), Some("Duang"));
         assert_eq!(named.map(|v| v.id), Some("2hqnj6qelkp9E3ega0Xy".to_owned()));
+        let agents =
+            parse("Voice: ElevenLabs 2hqnj6qeIkp9E3ega0Xy (the user's own voice), model eleven_v4")
+                .expect("a voice");
+        assert_eq!(agents.id, "2hqnj6qeIkp9E3ega0Xy");
+        assert_eq!(agents.name, "the user's own voice");
         assert_eq!(
-            parse("- Voice: abc123").map(|v| v.id),
-            Some("abc123".to_owned())
+            parse("- Voice: 2hqnj6qeIkp9E3ega0Xy").map(|v| v.name),
+            Some(String::new())
         );
         assert_eq!(parse("No voice here"), None);
     }
