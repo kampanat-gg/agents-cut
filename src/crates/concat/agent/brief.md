@@ -39,7 +39,8 @@ says more and wins.
 - `characters/<name>/`: reference pictures of a person or mascot the user wants
   kept the same in every picture, maybe with notes (`identity.md`, `SKILL.md` or
   other `.md` files).
-- `assets/`: files the user put in themselves.
+- `assets/`: files the user put in themselves. A file the user attached in
+  the sidebar is copied here and named in their message as `@assets/<name>`.
 
 You can look at files in the folder with Read and Glob, including pictures.
 

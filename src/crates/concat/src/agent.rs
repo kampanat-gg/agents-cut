@@ -17,6 +17,11 @@
 //! event loop as [`Said`] and lands in [`Chat::hear`], which turns it into
 //! the sidebar's rows. A stopped turn's leftovers are told apart by the
 //! turn's number and dropped.
+//!
+//! Tool calls are not rows of their own: the calls between two things the
+//! agent says are one block of steps, each named in words ([`describe`])
+//! and timed, under a header that says what is happening now and for how
+//! long, folding to a one-line summary once the agent speaks again.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -24,6 +29,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use slint::{ComponentHandle, Model, VecModel};
@@ -31,7 +37,7 @@ use slint::{ComponentHandle, Model, VecModel};
 use crate::host::Shell;
 use crate::i18n::{t, tf};
 use crate::studio::Studio;
-use crate::ui::{Agent, AgentRow, AgentStarter, App};
+use crate::ui::{Agent, AgentRow, AgentStarter, AgentStep, App};
 
 /// The tools the agent may call: the editor's, and of the machine's only
 /// `codex exec`, for pictures, and reading inside the project's folder,
@@ -45,6 +51,20 @@ const CODEX_RULE: &str = "Bash(codex exec:*)";
 /// a first start can sit behind a system prompt (a privacy question about
 /// the folder, a Keychain question) that nobody sees.
 const QUIET: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// The models the sidebar offers: `claude --model`'s alias, or none for the
+/// user's own default, and the name the chip shows.
+pub const MODELS: [(&str, &str); 5] = [
+    ("", "Claude"),
+    ("fable", "Fable"),
+    ("opus", "Opus"),
+    ("sonnet", "Sonnet"),
+    ("haiku", "Haiku"),
+];
+
+/// The efforts it offers, as `claude --effort` takes them; none is the
+/// default.
+pub const EFFORTS: [&str; 6] = ["", "low", "medium", "high", "xhigh", "max"];
 
 /// How much of a tool's input or a failure is shown under its row.
 const DETAIL_CHARS: usize = 160;
@@ -69,7 +89,7 @@ pub enum Said {
     Tool {
         id: String,
         name: String,
-        input: String,
+        input: Value,
     },
     /// A tool call's end.
     Outcome {
@@ -93,6 +113,27 @@ struct Turn {
     heard: bool,
 }
 
+/// One tool call, as its block shows it.
+struct Step {
+    label: String,
+    detail: String,
+    /// 0 running, 1 done, 2 failed: [`AgentStep::state`].
+    state: i32,
+    began: Instant,
+    took: Option<Duration>,
+}
+
+/// The tool calls between two things the agent said.
+struct Group {
+    /// The row it is drawn in.
+    row: usize,
+    steps: Vec<Step>,
+    began: Instant,
+    /// Steps are still being added: the agent has not spoken since.
+    live: bool,
+    open: bool,
+}
+
 /// The conversation, and the process behind it.
 pub struct Chat {
     rows: Rc<VecModel<AgentRow>>,
@@ -103,12 +144,25 @@ pub struct Chat {
     turn: Option<Turn>,
     /// Counts turns, so a stopped one's late words are known as such.
     epoch: u64,
-    /// The row each running tool call is drawn in, by its id.
-    tools: HashMap<String, usize>,
+    /// Every block of steps, in the order they appear.
+    groups: Vec<Group>,
+    /// Where each running tool call is drawn: its block and its step.
+    tools: HashMap<String, (usize, usize)>,
+    /// Redraws the open block's clock once a second while a turn runs.
+    tick: slint::Timer,
     /// A server of the agent's own, while the Automation page has none
     /// running.
     server: Option<concat_server::Server>,
     shown: bool,
+    /// Indexes into [`MODELS`] and [`EFFORTS`].
+    model: usize,
+    effort: usize,
+    /// The open project's style, for the strip above the box.
+    style_name: String,
+    /// Words for the box, from files attached, and a count that tells the
+    /// box there is more.
+    attached: String,
+    attached_token: i32,
     /// Fires once a turn has been quiet for [`QUIET`].
     watch: slint::Timer,
 }
@@ -121,9 +175,16 @@ impl Default for Chat {
             session: None,
             turn: None,
             epoch: 0,
+            groups: Vec::new(),
             tools: HashMap::new(),
+            tick: slint::Timer::default(),
             server: None,
             shown: true,
+            model: 0,
+            effort: 0,
+            style_name: String::new(),
+            attached: String::new(),
+            attached_token: 0,
             watch: slint::Timer::default(),
         }
     }
@@ -149,7 +210,12 @@ impl Chat {
     /// Shows the buttons of the style the project at `folder` was made
     /// with, in the interface's language; none for a project without one.
     pub fn load_style(&mut self, folder: &Path) {
-        let starters: Vec<AgentStarter> = crate::styles::of_project(folder)
+        let style = crate::styles::of_project(folder);
+        self.style_name = style
+            .as_ref()
+            .map(|style| style.name().to_owned())
+            .unwrap_or_default();
+        let starters: Vec<AgentStarter> = style
             .map(|style| {
                 style
                     .starters
@@ -173,11 +239,66 @@ impl Chat {
         self.shown = shown;
     }
 
+    /// Takes the model and effort the preferences remember.
+    pub fn remember(&mut self, model: Option<&str>, effort: Option<&str>) {
+        let model = model.unwrap_or_default();
+        let effort = effort.unwrap_or_default();
+        self.model = MODELS
+            .iter()
+            .position(|(alias, _)| *alias == model)
+            .unwrap_or(0);
+        self.effort = EFFORTS
+            .iter()
+            .position(|level| *level == effort)
+            .unwrap_or(0);
+    }
+
+    /// Picks a model by its index in [`MODELS`]; its alias, for the
+    /// preferences, or None for the default.
+    pub fn choose_model(&mut self, index: usize) -> Option<String> {
+        self.model = index.min(MODELS.len() - 1);
+        Some(MODELS[self.model].0.to_owned()).filter(|alias| !alias.is_empty())
+    }
+
+    /// Picks an effort by its index in [`EFFORTS`]; as for the model.
+    pub fn choose_effort(&mut self, index: usize) -> Option<String> {
+        self.effort = index.min(EFFORTS.len() - 1);
+        Some(EFFORTS[self.effort].to_owned()).filter(|level| !level.is_empty())
+    }
+
     /// Writes what the sidebar shows that is not a row.
     pub fn publish(&self, app: &App) {
         let agent = app.global::<Agent>();
         agent.set_busy(self.busy());
         agent.set_shown(self.shown);
+        agent.set_model(self.model as i32);
+        agent.set_effort(self.effort as i32);
+        agent.set_style_name(self.style_name.as_str().into());
+        if agent.get_attached_token() != self.attached_token {
+            agent.set_attached_text(self.attached.as_str().into());
+            agent.set_attached_token(self.attached_token);
+        }
+    }
+
+    /// The labels of the model and effort lists, in the interface's
+    /// language, handed to the sidebar once.
+    pub fn choices() -> (Vec<slint::SharedString>, Vec<slint::SharedString>) {
+        let models = MODELS.iter().map(|(_, label)| (*label).into()).collect();
+        let efforts = EFFORTS
+            .iter()
+            .map(|level| {
+                match *level {
+                    "low" => t("agent.effort.low"),
+                    "medium" => t("agent.effort.medium"),
+                    "high" => t("agent.effort.high"),
+                    "xhigh" => t("agent.effort.xhigh"),
+                    "max" => t("agent.effort.max"),
+                    _ => t("agent.effort.default"),
+                }
+                .into()
+            })
+            .collect();
+        (models, efforts)
     }
 
     fn push(&mut self, role: &str, text: &str, detail: &str, state: i32) -> usize {
@@ -186,8 +307,123 @@ impl Chat {
             text: text.into(),
             detail: detail.into(),
             state,
+            steps: Default::default(),
+            open: false,
+            elapsed: Default::default(),
         });
         self.rows.row_count() - 1
+    }
+
+    /// The block steps go into now: the last one while the agent has not
+    /// spoken since, else a new one.
+    fn live_group(&mut self) -> usize {
+        if let Some(last) = self.groups.len().checked_sub(1)
+            && self.groups[last].live
+        {
+            return last;
+        }
+        let row = self.push("steps", "", "", 0);
+        self.groups.push(Group {
+            row,
+            steps: Vec::new(),
+            began: Instant::now(),
+            live: true,
+            open: true,
+        });
+        self.groups.len() - 1
+    }
+
+    /// Folds the live block to its summary: the agent has spoken, or the
+    /// turn is over. Calls still running then are failed ones.
+    fn close_group(&mut self, fail_running: bool) {
+        if let Some(index) = self.groups.iter().rposition(|group| group.live) {
+            let group = &mut self.groups[index];
+            group.live = false;
+            group.open = false;
+            if fail_running {
+                for step in group.steps.iter_mut().filter(|step| step.state == 0) {
+                    step.state = 2;
+                    step.took = Some(step.began.elapsed());
+                }
+            }
+            self.draw_group(index);
+        }
+    }
+
+    /// Writes block `index` into its row.
+    fn draw_group(&mut self, index: usize) {
+        let Some(group) = self.groups.get(index) else {
+            return;
+        };
+        let running = group.steps.iter().rposition(|step| step.state == 0);
+        let failed = group.steps.iter().any(|step| step.state == 2);
+        let span = if group.live {
+            group.began.elapsed()
+        } else {
+            group
+                .steps
+                .iter()
+                .map(|step| (step.began - group.began) + step.took.unwrap_or_default())
+                .max()
+                .unwrap_or_default()
+        };
+        let title = match running {
+            Some(step) if group.live => group.steps[step].label.clone(),
+            _ if group.live => group
+                .steps
+                .last()
+                .map(|step| step.label.clone())
+                .unwrap_or_default(),
+            _ if group.steps.len() == 1 => t("agent.stepDone"),
+            _ => tf("agent.stepsDone", &[&group.steps.len()]),
+        };
+        let last = group.steps.len().saturating_sub(1);
+        let steps: Vec<AgentStep> = group
+            .steps
+            .iter()
+            .enumerate()
+            .map(|(at, step)| AgentStep {
+                label: step.label.as_str().into(),
+                detail: step.detail.as_str().into(),
+                state: step.state,
+                time: step.took.map(seconds).unwrap_or_default().into(),
+                last: at == last,
+            })
+            .collect();
+        let row = AgentRow {
+            role: "steps".into(),
+            text: title.into(),
+            detail: Default::default(),
+            state: if group.live && self.turn.is_some() {
+                0
+            } else if failed {
+                2
+            } else {
+                1
+            },
+            steps: slint::ModelRc::from(Rc::new(VecModel::from(steps))),
+            open: group.open,
+            elapsed: duration(span).into(),
+        };
+        let at = group.row;
+        if at < self.rows.row_count() {
+            self.rows.set_row_data(at, row);
+        }
+    }
+
+    /// Opens or folds the block drawn in row `row`.
+    pub fn toggle(&mut self, row: usize) {
+        if let Some(index) = self.groups.iter().position(|group| group.row == row) {
+            self.groups[index].open = !self.groups[index].open;
+            self.draw_group(index);
+        }
+    }
+
+    /// Redraws the live block, for its clock.
+    fn refresh(&mut self) {
+        if let Some(index) = self.groups.iter().rposition(|group| group.live) {
+            self.draw_group(index);
+        }
     }
 
     /// Stops the running turn, if there is one: its process is killed and
@@ -206,9 +442,9 @@ impl Chat {
             let _ = child.kill();
         }
         self.epoch += 1;
-        for row in std::mem::take(&mut self.tools).into_values() {
-            self.settle(row, 2, None);
-        }
+        self.tick.stop();
+        self.tools.clear();
+        self.close_group(true);
         true
     }
 
@@ -216,17 +452,8 @@ impl Chat {
     pub fn new_chat(&mut self) {
         self.stop();
         self.rows.set_vec(Vec::new());
+        self.groups.clear();
         self.session = None;
-    }
-
-    fn settle(&mut self, row: usize, state: i32, detail: Option<&str>) {
-        if let Some(mut data) = self.rows.row_data(row) {
-            data.state = state;
-            if let Some(detail) = detail {
-                data.detail = detail.into();
-            }
-            self.rows.set_row_data(row, data);
-        }
     }
 
     /// Says so when the turn `epoch` is still running and has said nothing.
@@ -250,17 +477,37 @@ impl Chat {
             Said::Text(text) => {
                 let text = text.trim();
                 if !text.is_empty() {
+                    self.close_group(false);
                     self.push("assistant", text, "", 0);
                 }
             }
             Said::Tool { id, name, input } => {
-                let row = self.push("tool", &tool_label(&name), &input, 0);
-                self.tools.insert(id, row);
+                let (label, detail) = describe(&name, &input);
+                let index = self.live_group();
+                let group = &mut self.groups[index];
+                group.steps.push(Step {
+                    label,
+                    detail,
+                    state: 0,
+                    began: Instant::now(),
+                    took: None,
+                });
+                self.tools.insert(id, (index, group.steps.len() - 1));
+                self.draw_group(index);
             }
             Said::Outcome { id, failed, text } => {
-                if let Some(row) = self.tools.remove(&id) {
-                    let detail = failed.then(|| clip(&text));
-                    self.settle(row, if failed { 2 } else { 1 }, detail.as_deref());
+                if let Some((index, at)) = self.tools.remove(&id)
+                    && let Some(step) = self
+                        .groups
+                        .get_mut(index)
+                        .and_then(|group| group.steps.get_mut(at))
+                {
+                    step.state = if failed { 2 } else { 1 };
+                    step.took = Some(step.began.elapsed());
+                    if failed {
+                        step.detail = clip(&text);
+                    }
+                    self.draw_group(index);
                 }
             }
             Said::Finished(error) => {
@@ -274,9 +521,9 @@ impl Chat {
             Said::Exited { ok, stderr } => {
                 let finished = self.turn.take().is_some_and(|turn| turn.finished);
                 self.epoch += 1;
-                for row in std::mem::take(&mut self.tools).into_values() {
-                    self.settle(row, 2, None);
-                }
+                self.tick.stop();
+                self.tools.clear();
+                self.close_group(true);
                 if !ok && !finished {
                     let why = last_line(&stderr).unwrap_or("exit");
                     self.push("error", &tf("agent.failed", &[&why]), "", 0);
@@ -340,6 +587,13 @@ fn start(studio: &mut Studio, text: &str) -> Result<(), String> {
             .args(["--allowedTools", ALLOWED]);
     }
     command.arg("--append-system-prompt").arg(brief);
+    let (model, effort) = (MODELS[studio.agent.model].0, EFFORTS[studio.agent.effort]);
+    if !model.is_empty() {
+        command.args(["--model", model]);
+    }
+    if !effort.is_empty() {
+        command.args(["--effort", effort]);
+    }
     if let Some(session) = &studio.agent.session {
         command.arg("--resume").arg(session);
     }
@@ -377,6 +631,10 @@ fn start(studio: &mut Studio, text: &str) -> Result<(), String> {
                 studio.agent.publish(&app);
             });
         });
+    chat.tick
+        .start(slint::TimerMode::Repeated, Duration::from_secs(1), || {
+            Shell::with(|shell, _| shell.studio.borrow_mut().agent.refresh());
+        });
     log::info!("agent: turn {epoch} started");
 
     std::thread::Builder::new()
@@ -384,6 +642,63 @@ fn start(studio: &mut Studio, text: &str) -> Result<(), String> {
         .spawn(move || listen(epoch, child, stdout, stderr))
         .map_err(|error| tf("agent.couldNotStart", &[&error]))?;
     Ok(())
+}
+
+/// Files the user attached: copied into the project's `assets/` (a file
+/// already inside the project is used where it is) and named in the box
+/// as `@assets/<name>`, which the brief tells the agent how to read.
+pub fn attach(studio: &mut Studio, files: Vec<PathBuf>) {
+    let Some(project) = studio
+        .session
+        .as_ref()
+        .map(|session| PathBuf::from(session.path()))
+    else {
+        return;
+    };
+    let assets = project.join("assets");
+    let mut named = Vec::new();
+    for file in files {
+        let inside = file.canonicalize().ok().and_then(|file| {
+            let project = project.canonicalize().ok()?;
+            file.strip_prefix(&project).ok().map(Path::to_path_buf)
+        });
+        let relative = match inside {
+            Some(relative) => relative,
+            None => {
+                let Some(name) = file.file_name() else {
+                    continue;
+                };
+                let _ = std::fs::create_dir_all(&assets);
+                let mut target = assets.join(name);
+                let mut n = 2;
+                while target.exists() {
+                    let stem = Path::new(name)
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy();
+                    let ext = Path::new(name)
+                        .extension()
+                        .map(|ext| format!(".{}", ext.to_string_lossy()))
+                        .unwrap_or_default();
+                    target = assets.join(format!("{stem} {n}{ext}"));
+                    n += 1;
+                }
+                if let Err(error) = std::fs::copy(&file, &target) {
+                    studio.notify(&tf("agent.couldNotAttach", &[&error]), true);
+                    continue;
+                }
+                target
+                    .strip_prefix(&project)
+                    .map(Path::to_path_buf)
+                    .unwrap_or(target)
+            }
+        };
+        named.push(format!("@{}", relative.to_string_lossy()));
+    }
+    if !named.is_empty() {
+        studio.agent.attached = format!("{} ", named.join(" "));
+        studio.agent.attached_token += 1;
+    }
 }
 
 /// Reads one turn's process to its end, handing each thing it says to
@@ -454,29 +769,11 @@ pub fn parse(line: &str) -> Vec<Said> {
             .iter()
             .filter_map(|block| match block["type"].as_str() {
                 Some("text") => Some(Said::Text(block["text"].as_str()?.to_owned())),
-                Some("tool_use") => {
-                    let name = block["name"].as_str()?;
-                    let input = &block["input"];
-                    // A shell call is named by its program and shown by
-                    // what it asks for, not by the command line.
-                    let (name, input) = match input["command"].as_str() {
-                        Some(command) if name == "Bash" => (
-                            command.split_whitespace().next().unwrap_or(name).to_owned(),
-                            clip(
-                                input["description"]
-                                    .as_str()
-                                    .or_else(|| quoted(command))
-                                    .unwrap_or(command),
-                            ),
-                        ),
-                        _ => (name.to_owned(), summary(input)),
-                    };
-                    Some(Said::Tool {
-                        id: block["id"].as_str()?.to_owned(),
-                        name,
-                        input,
-                    })
-                }
+                Some("tool_use") => Some(Said::Tool {
+                    id: block["id"].as_str()?.to_owned(),
+                    name: block["name"].as_str()?.to_owned(),
+                    input: block["input"].clone(),
+                }),
                 _ => None,
             })
             .collect(),
@@ -511,19 +808,6 @@ pub fn parse(line: &str) -> Vec<Said> {
     }
 }
 
-/// A tool's input as one short line, without the project's folder that
-/// every call repeats.
-fn summary(input: &Value) -> String {
-    let mut input = input.clone();
-    if let Some(fields) = input.as_object_mut() {
-        fields.remove("path");
-        if fields.is_empty() {
-            return String::new();
-        }
-    }
-    clip(&input.to_string())
-}
-
 /// A tool result's words: a string, or the text blocks of a list.
 fn result_text(content: &Value) -> String {
     match content {
@@ -545,9 +829,159 @@ fn quoted(command: &str) -> Option<&str> {
     Some(&command[start..start + length])
 }
 
-/// `mcp__concat__clip_trim` as "clip trim".
-fn tool_label(name: &str) -> String {
-    name.rsplit("__").next().unwrap_or(name).replace('_', " ")
+/// A tool call in words, for its step: what it does, and under it what
+/// it does that to. The editor's tools by what they are for, a Codex call
+/// by the picture it was asked for, a read by the file's name.
+pub fn describe(name: &str, input: &Value) -> (String, String) {
+    let tool = name.rsplit("__").next().unwrap_or(name);
+    let text = |key: &str| input[key].as_str().unwrap_or_default();
+    let file_name = |key: &str| {
+        Path::new(text(key))
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default()
+    };
+    match tool {
+        "Bash" => {
+            let command = text("command");
+            let asked = quoted(command).unwrap_or(command);
+            if asked.contains("ffmpeg") || asked.to_lowercase().contains("join") {
+                (t("agent.step.join"), String::new())
+            } else {
+                // The picture itself: what follows "Generate an image:",
+                // up to where the prompt turns to saving it.
+                let picture = asked
+                    .split_once("Generate an image:")
+                    .map_or(asked, |(_, rest)| rest);
+                let picture = picture
+                    .split_once(" Save it as")
+                    .map_or(picture, |(before, _)| before);
+                (t("agent.step.draw"), clip(picture))
+            }
+        }
+        "Read" => (
+            tf("agent.step.look", &[&file_name("file_path")]),
+            String::new(),
+        ),
+        "Glob" | "Grep" => (t("agent.step.browse"), String::new()),
+        "project_open" => (t("agent.step.open"), String::new()),
+        "project_get" | "timeline_read" => (t("agent.step.read"), String::new()),
+        "media_import" => (
+            tf("agent.step.import", &[&file_name("file")]),
+            String::new(),
+        ),
+        "clip_add" | "clips_add_sequence" => (t("agent.step.place"), String::new()),
+        "clip_trim" | "clip_speed" => (t("agent.step.trim"), String::new()),
+        "clip_transform" | "clip_update" | "clip_frame" | "clip_mask" | "clips_move" => {
+            (t("agent.step.adjust"), String::new())
+        }
+        "keyframe_set" | "keyframe_clear" | "effect_key_set" => {
+            (t("agent.step.animate"), String::new())
+        }
+        "title_add" | "title_style_words" => (t("agent.step.title"), clip(text("text"))),
+        "captions_add" => (t("agent.step.captions"), String::new()),
+        "preview_frame" => {
+            let at = input["time"].as_f64().unwrap_or_default();
+            (tf("agent.step.check", &[&seconds_of(at)]), String::new())
+        }
+        "edit_undo" | "edit_redo" => (t("agent.step.undo"), String::new()),
+        "effects_list" | "catalogue_list" => (t("agent.step.effects"), String::new()),
+        "export_start" | "export_wait" | "export_status" => (t("agent.step.export"), String::new()),
+        "edit_apply" => describe_edit(&input["command"]),
+        other => (other.replace('_', " "), String::new()),
+    }
+}
+
+/// An `edit_apply` command in words: one edit by what it does, a batch by
+/// how many changes and of which kinds.
+fn describe_edit(command: &Value) -> (String, String) {
+    let ops: Vec<&Value> = match command["op"].as_str() {
+        Some("batch") => command["commands"]
+            .as_array()
+            .map(|commands| commands.iter().collect())
+            .unwrap_or_default(),
+        _ => vec![command],
+    };
+    if let [only] = ops[..] {
+        match only["op"].as_str() {
+            Some("addTimeline" | "renameTimeline") => {
+                return (
+                    t("agent.step.episode"),
+                    clip(only["name"].as_str().unwrap_or_default()),
+                );
+            }
+            Some("addLayerClip") => {
+                let effect = only["effectId"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .trim_start_matches("concat.")
+                    .replace('-', " ");
+                return (tf("agent.step.layer", &[&effect]), String::new());
+            }
+            _ => {}
+        }
+    }
+    // Each kind once, in the order first used, with how many there were.
+    let mut kinds: Vec<(String, usize)> = Vec::new();
+    for op in &ops {
+        let kind = words_of(op["op"].as_str().unwrap_or("edit"));
+        match kinds.iter_mut().find(|(seen, _)| *seen == kind) {
+            Some((_, count)) => *count += 1,
+            None => kinds.push((kind, 1)),
+        }
+    }
+    let detail = kinds
+        .iter()
+        .map(|(kind, count)| {
+            if *count > 1 {
+                format!("{kind} ×{count}")
+            } else {
+                kind.clone()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    (tf("agent.step.edit", &[&ops.len()]), clip(&detail))
+}
+
+/// `setClipKey` as "set clip key".
+fn words_of(op: &str) -> String {
+    let mut words = String::new();
+    for character in op.chars() {
+        if character.is_uppercase() && !words.is_empty() {
+            words.push(' ');
+        }
+        words.extend(character.to_lowercase());
+    }
+    words
+}
+
+/// A step's time: "5.1s", or "1m 05s" past a minute.
+fn seconds(took: Duration) -> String {
+    let secs = took.as_secs_f64();
+    if secs < 60.0 {
+        tf("agent.seconds", &[&format!("{secs:.1}")])
+    } else {
+        duration(took)
+    }
+}
+
+/// A block's time, whole seconds: "11s", "2m 14s".
+fn duration(span: Duration) -> String {
+    let secs = span.as_secs();
+    if secs < 60 {
+        tf("agent.seconds", &[&secs])
+    } else {
+        tf(
+            "agent.minutes",
+            &[&(secs / 60), &format!("{:02}", secs % 60)],
+        )
+    }
+}
+
+/// A time on the timeline in words: "26s", "1m 05s".
+fn seconds_of(at: f64) -> String {
+    duration(Duration::from_secs_f64(at.max(0.0)))
 }
 
 fn clip(text: &str) -> String {
@@ -689,7 +1123,7 @@ mod tests {
                 Said::Tool {
                     id: "t1".to_owned(),
                     name: "mcp__concat__clip_trim".to_owned(),
-                    input: r#"{"clipId":"c1","end":4}"#.to_owned(),
+                    input: serde_json::json!({ "path": "/p", "clipId": "c1", "end": 4 }),
                 },
             ]
         );
@@ -707,24 +1141,74 @@ mod tests {
             parse(r#"{"session_id":"s1","type":"result","is_error":false,"result":"Done."}"#),
             vec![Said::Session("s1".to_owned()), Said::Finished(None)]
         );
-        assert_eq!(
-            parse(
-                r#"{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t2","name":"Bash","input":{"command":"codex exec -C '/p' \"Generate an image: a red sky\""}}]}}"#
-            ),
-            vec![Said::Tool {
-                id: "t2".to_owned(),
-                name: "codex".to_owned(),
-                input: "Generate an image: a red sky".to_owned(),
-            }]
-        );
         assert!(parse(r#"{"type":"rate_limit_event"}"#).is_empty());
         assert!(parse("not json").is_empty());
     }
 
     #[test]
-    fn a_tool_is_named_in_words() {
-        assert_eq!(tool_label("mcp__concat__clip_trim"), "clip trim");
-        assert_eq!(tool_label("captions_add"), "captions add");
+    fn a_step_is_named_in_words() {
+        use serde_json::json;
+        assert_eq!(
+            describe(
+                "Bash",
+                &json!({ "command": "codex exec -C '/p' -- \"Generate an image: a red sky over the sea. Save it as generated/sky.png\"" })
+            ),
+            (
+                "Drawing a picture".to_owned(),
+                "a red sky over the sea.".to_owned()
+            )
+        );
+        assert_eq!(
+            describe(
+                "Bash",
+                &json!({ "command": "codex exec -C '/p' -- \"Join the frames with ffmpeg\"" })
+            )
+            .0,
+            "Joining the frames into a clip"
+        );
+        assert_eq!(
+            describe(
+                "mcp__concat__media_import",
+                &json!({ "path": "/p", "file": "/p/generated/kraken.png" })
+            )
+            .0,
+            "Importing kraken.png"
+        );
+        assert_eq!(
+            describe("mcp__concat__preview_frame", &json!({ "time": 26 })).0,
+            "Checking the frame at 26s"
+        );
+        assert_eq!(
+            describe(
+                "mcp__concat__edit_apply",
+                &json!({ "command": { "op": "batch", "commands": [
+                    { "op": "setClipKey" }, { "op": "setClipKey" }, { "op": "addTextClip" }
+                ] } })
+            ),
+            (
+                "Editing (3 changes)".to_owned(),
+                "set clip key ×2, add text clip".to_owned()
+            )
+        );
+        assert_eq!(
+            describe(
+                "mcp__concat__edit_apply",
+                &json!({ "command": { "op": "addLayerClip", "effectId": "concat.rain-drops" } })
+            )
+            .0,
+            "Adding rain drops"
+        );
+        assert_eq!(
+            describe("mcp__concat__something_new", &json!({})).0,
+            "something new"
+        );
+    }
+
+    #[test]
+    fn times_read_as_people_say_them() {
+        assert_eq!(seconds(Duration::from_millis(5_120)), "5.1s");
+        assert_eq!(duration(Duration::from_secs(11)), "11s");
+        assert_eq!(duration(Duration::from_secs(134)), "2m 14s");
     }
 
     #[test]

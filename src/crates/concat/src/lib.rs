@@ -677,6 +677,36 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         agent.on_new_chat(on_window!(|state| {
             state.agent.new_chat();
         }));
+        {
+            let (models, efforts) = agent::Chat::choices();
+            agent.set_models(ModelRc::from(Rc::new(VecModel::from(models))));
+            agent.set_efforts(ModelRc::from(Rc::new(VecModel::from(efforts))));
+            let mut studio = shell.studio.borrow_mut();
+            let (model, effort) = (
+                studio.prefs.agent_model.clone(),
+                studio.prefs.agent_effort.clone(),
+            );
+            studio.agent.remember(model.as_deref(), effort.as_deref());
+        }
+        agent.on_model_picked(on_window!(|state, index: i32| {
+            state.prefs.agent_model = state.agent.choose_model(index.max(0) as usize);
+            state.prefs.save(&state.host.dirs);
+        }));
+        agent.on_effort_picked(on_window!(|state, index: i32| {
+            state.prefs.agent_effort = state.agent.choose_effort(index.max(0) as usize);
+            state.prefs.save(&state.host.dirs);
+        }));
+        // The picker runs on a turn of its own, with nothing borrowed; see
+        // `host::after_dialog`.
+        agent.on_attach(|| {
+            host::pick_files_then(i18n::t("agent.attach"), None, |studio, app, _, files| {
+                agent::attach(studio, files);
+                studio.agent.publish(app);
+            });
+        });
+        agent.on_toggle_steps(on_window!(|state, row: i32| {
+            state.agent.toggle(row.max(0) as usize);
+        }));
         agent.on_shown_changed(on_window!(|state, shown: bool| {
             state.agent.set_shown(shown);
         }));

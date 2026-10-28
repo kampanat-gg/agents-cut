@@ -3,8 +3,18 @@
 
 import { Theme } from "theme/theme.slint";
 import { I18n } from "i18n.slint";
-import { Glyph } from "icons.slint";
+import { Glyph, Icon } from "icons.slint";
 import { IconButton } from "primitives/panel.slint";
+
+/// One tool call in a block of steps, in words: `state` 0 while it runs, 1
+/// done, 2 failed; `time` once it is over; `last` draws no line under it.
+export struct AgentStep {
+    label: string,
+    detail: string,
+    state: int,
+    time: string,
+    last: bool,
+}
 
 /// One row of the conversation. `role` is "user", "assistant", "tool",
 /// "error" or "note"; a tool row's `detail` is what it was given, and its
@@ -14,7 +24,13 @@ export struct AgentRow {
     text: string,
     detail: string,
     state: int,
+    /// A "steps" row's steps, open or folded, and the time it took (or has
+    /// taken so far): the tool calls between two things the agent said.
+    steps: [AgentStep],
+    open: bool,
+    elapsed: string,
 }
+
 
 /// One of the style's buttons: a prompt sent as it is, or with `fill`
 /// put in the box for the user to finish.
@@ -40,69 +56,412 @@ export global Agent {
     callback cancel();
     callback new-chat();
     callback shown-changed(shown: bool);
+    /// A block of steps' header was pressed: open it, or fold it.
+    callback toggle-steps(row: int);
+
+    /// The model and the effort the next turn runs at, by index into the
+    /// two lists, which Rust fills once.
+    in-out property <[string]> models;
+    in-out property <int> model;
+    in-out property <[string]> efforts;
+    in-out property <int> effort;
+    callback model-picked(index: int);
+    callback effort-picked(index: int);
+    /// The open project's style, for the strip above the box; empty for
+    /// none.
+    in-out property <string> style-name;
+    /// The + button: files to attach. What they are called in the message
+    /// comes back as `attached-text`, and `attached-token` moves each time.
+    callback attach();
+    in-out property <string> attached-text;
+    in-out property <int> attached-token;
+}
+
+// A small round button in the box's bottom row.
+component RoundButton inherits Rectangle {
+    in property <Glyph> glyph;
+    in property <bool> filled;
+    in property <bool> enabled: true;
+    in property <string> label;
+    callback clicked();
+
+    width: 30px;
+    height: 30px;
+    border-radius: 15px;
+    background: root.filled ? (touch.has-hover ? Theme.accent-hover : Theme.accent)
+        : touch.has-hover && root.enabled ? Theme.field-hover : transparent;
+    border-width: root.filled ? 0px : 1px;
+    border-color: Theme.line-strong;
+    opacity: root.enabled ? 1 : 0.45;
+
+    Icon {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        glyph: root.glyph;
+        size: 14px;
+        tint: root.filled ? Theme.on-accent : Theme.fg-muted;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Four rising bars, so many of them lit: how hard the agent thinks.
+component EffortBars inherits Rectangle {
+    in property <int> lit;
+
+    width: 14px;
+    height: 12px;
+
+    for bar in 4: Rectangle {
+        x: bar * 4px;
+        y: parent.height - self.height;
+        width: 2.5px;
+        height: 3px + bar * 3px;
+        border-radius: 1px;
+        background: bar < root.lit ? Theme.fg : Theme.line-strong;
+    }
+}
+
+// A chip in the box's bottom row that opens a list above it.
+component Chooser inherits Rectangle {
+    in property <[string]> options;
+    in property <int> current;
+    in property <bool> bars;
+    callback picked(index: int);
+
+    property <length> row-h: 28px;
+
+    height: 30px;
+    width: chip.preferred-width + 16px;
+    border-radius: 15px;
+    background: touch.has-hover ? Theme.field-hover : transparent;
+
+    chip := HorizontalLayout {
+        x: 8px;
+        spacing: 6px;
+        alignment: start;
+
+        VerticalLayout {
+            alignment: center;
+            if root.bars: EffortBars {
+                // Default lights two; each level one more, max all four.
+                lit: root.current == 0 ? 2 : Math.min(4, root.current);
+            }
+            if !root.bars: Icon {
+                glyph: Glyph.sparkle;
+                size: 13px;
+                tint: Theme.accent;
+            }
+        }
+
+        Text {
+            text: root.options.length > 0 ? root.options[root.current] : "";
+            color: Theme.fg-muted;
+            font-size: Theme.fs-sm;
+            vertical-alignment: center;
+        }
+
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                glyph: Glyph.chevron-down;
+                size: 10px;
+                tint: Theme.fg-dim;
+            }
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { menu.show(); }
+    }
+
+    menu := PopupWindow {
+        x: 0;
+        y: -(root.options.length * root.row-h + 12px);
+        width: 150px;
+        height: root.options.length * root.row-h + 8px;
+
+        Rectangle {
+            background: Theme.raised;
+            border-radius: Theme.r;
+            border-width: 1px;
+            border-color: Theme.line-strong;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: #00000055;
+
+            for option[index] in root.options: Rectangle {
+                x: 4px;
+                y: 4px + index * root.row-h;
+                width: parent.width - 8px;
+                height: root.row-h;
+                border-radius: Theme.r-sm;
+                background: pick.has-hover ? Theme.field-hover : transparent;
+
+                Text {
+                    x: 10px;
+                    text: option;
+                    color: index == root.current ? Theme.fg : Theme.fg-muted;
+                    font-size: Theme.fs;
+                    font-weight: index == root.current ? Theme.weight-title : Theme.weight-body;
+                    vertical-alignment: center;
+                }
+
+                if index == root.current: Icon {
+                    x: parent.width - self.width - 8px;
+                    y: (parent.height - self.height) / 2;
+                    glyph: Glyph.check;
+                    size: 12px;
+                    tint: Theme.accent;
+                }
+
+                pick := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.picked(index); }
+                }
+            }
+        }
+    }
+}
+
+// Something going on: a dot that breathes, not a spinner that demands to be
+// watched.
+component Pulse inherits Rectangle {
+    in property <length> size: 8px;
+
+    width: root.size;
+    height: root.size;
+    border-radius: root.size / 2;
+    background: Theme.accent;
+    opacity: 0.35 + 0.65 * Math.abs(Math.sin(animation-tick() / 1s * 160deg));
+}
+
+// The mark beside a step: a pulse while it runs, a tick once done, a cross
+// if it failed.
+component StepMark inherits Rectangle {
+    in property <int> state;
+
+    width: 14px;
+    height: 14px;
+
+    if root.state == 0: Pulse {
+        x: 3px;
+        y: 3px;
+    }
+    if root.state == 1: Icon {
+        x: 0;
+        y: 0;
+        glyph: Glyph.check;
+        size: 13px;
+        tint: Theme.fg-dim;
+    }
+    if root.state == 2: Icon {
+        x: 1px;
+        y: 1px;
+        glyph: Glyph.close;
+        size: 11px;
+        tint: Theme.danger;
+    }
+}
+
+// A block of steps: a header that says what is going on now and for how
+// long, and, open, each step under it on a line, with its time.
+component Steps inherits Rectangle {
+    in property <AgentRow> data;
+    in property <int> position;
+
+    height: column.preferred-height;
+
+    column := VerticalLayout {
+        spacing: 0px;
+
+        // ── the header ──
+        Rectangle {
+            height: 30px;
+
+            HorizontalLayout {
+                spacing: 8px;
+                padding-left: 2px;
+
+                VerticalLayout {
+                    alignment: center;
+                    StepMark {
+                        state: root.data.state;
+                    }
+                }
+
+                Text {
+                    horizontal-stretch: 1;
+                    text: root.data.text;
+                    color: root.data.state == 0 ? Theme.fg : Theme.fg-muted;
+                    font-size: Theme.fs;
+                    font-weight: Theme.weight-title;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                Text {
+                    text: root.data.elapsed;
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-sm;
+                    vertical-alignment: center;
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    Icon {
+                        glyph: root.data.open ? Glyph.chevron-up : Glyph.chevron-down;
+                        size: 12px;
+                        tint: header.has-hover ? Theme.fg : Theme.fg-dim;
+                    }
+                }
+            }
+
+            header := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { Agent.toggle-steps(root.position); }
+            }
+        }
+
+        // ── the steps ──
+        if root.data.open: VerticalLayout {
+            padding-top: 2px;
+            padding-bottom: 4px;
+
+            for step in root.data.steps: Rectangle {
+                height: line.preferred-height;
+
+                // The thread down from this step to the next.
+                if !step.last: Rectangle {
+                    x: 2px + 7px - 0.5px;
+                    y: 18px;
+                    width: 1px;
+                    height: parent.height - 18px + 2px;
+                    background: Theme.line;
+                }
+
+                line := HorizontalLayout {
+                    spacing: 8px;
+                    padding-left: 2px;
+                    padding-bottom: 8px;
+
+                    VerticalLayout {
+                        alignment: start;
+                        padding-top: 2px;
+                        StepMark {
+                            state: step.state;
+                        }
+                    }
+
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: 2px;
+
+                        Text {
+                            text: step.label;
+                            color: step.state == 0 ? Theme.fg : Theme.fg-muted;
+                            font-size: Theme.fs;
+                            wrap: word-wrap;
+                        }
+
+                        if step.detail != "": Text {
+                            text: step.detail;
+                            color: step.state == 2 ? Theme.danger : Theme.fg-dim;
+                            font-size: Theme.fs-sm;
+                            wrap: word-wrap;
+                            max-height: 34px;
+                            overflow: elide;
+                        }
+                    }
+
+                    Text {
+                        text: step.time;
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-sm;
+                        vertical-alignment: top;
+                    }
+                }
+            }
+        }
+    }
 }
 
 component Bubble inherits Rectangle {
     in property <AgentRow> data;
+    in property <int> position;
 
     property <bool> mine: data.role == "user";
     property <bool> tool: data.role == "tool";
     property <bool> problem: data.role == "error";
     property <bool> note: data.role == "note";
 
-    height: layout.preferred-height;
+    property <bool> steps: data.role == "steps";
 
-    layout := HorizontalLayout {
-        alignment: root.mine ? end : stretch;
+    height: stack.preferred-height;
 
-        Rectangle {
-            max-width: root.mine ? root.width * 0.85 : root.width;
-            background: root.mine ? Theme.accent-soft
-                : root.tool ? Theme.well
-                : root.problem ? Theme.danger-wash
-                : transparent;
-            border-radius: Theme.r;
-            border-width: root.problem ? 1px : 0px;
-            border-color: Theme.danger-edge;
+    stack := VerticalLayout {
+        if root.steps: Steps {
+            width: root.width;
+            data: root.data;
+            position: root.position;
+        }
 
-            VerticalLayout {
-                padding-left: root.mine || root.tool || root.problem ? 10px : 2px;
-                padding-right: root.mine || root.tool || root.problem ? 10px : 2px;
-                padding-top: root.tool ? 6px : 8px;
-                padding-bottom: root.tool ? 6px : 8px;
-                spacing: 2px;
+        if !root.steps: HorizontalLayout {
+            alignment: root.mine ? end : stretch;
 
-                HorizontalLayout {
-                    spacing: 6px;
+            Rectangle {
+                max-width: root.mine ? root.width * 0.85 : root.width;
+                background: root.mine ? Theme.accent-soft
+                    : root.tool ? Theme.well
+                    : root.problem ? Theme.danger-wash
+                    : transparent;
+                border-radius: Theme.r;
+                border-width: root.problem ? 1px : 0px;
+                border-color: Theme.danger-edge;
 
-                    if root.tool: Rectangle {
-                        width: 7px;
-                        height: 7px;
-                        y: (parent.height - self.height) / 2;
-                        border-radius: 4px;
-                        background: root.data.state == 0 ? Theme.fg-dim
-                            : root.data.state == 1 ? Theme.green
-                            : Theme.danger;
+                VerticalLayout {
+                    padding-left: root.mine || root.tool || root.problem ? 10px : 2px;
+                    padding-right: root.mine || root.tool || root.problem ? 10px : 2px;
+                    padding-top: root.tool ? 6px : 8px;
+                    padding-bottom: root.tool ? 6px : 8px;
+                    spacing: 2px;
+
+                    HorizontalLayout {
+                        spacing: 6px;
+
+                        if root.tool: Rectangle {
+                            width: 7px;
+                            height: 7px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 4px;
+                            background: root.data.state == 0 ? Theme.fg-dim
+                                : root.data.state == 1 ? Theme.green
+                                : Theme.danger;
+                        }
+
+                        Text {
+                            text: root.data.text;
+                            wrap: word-wrap;
+                            color: root.note ? Theme.fg-dim
+                                : root.problem ? Theme.danger
+                                : root.tool ? Theme.fg-muted
+                                : Theme.fg;
+                            font-size: root.tool || root.note ? Theme.fs-sm : Theme.fs-lg;
+                            font-weight: root.tool ? Theme.weight-title : Theme.weight-body;
+                            horizontal-alignment: root.note ? center : left;
+                        }
                     }
 
-                    Text {
-                        text: root.data.text;
+                    if root.tool && root.data.detail != "": Text {
+                        text: root.data.detail;
                         wrap: word-wrap;
-                        color: root.note ? Theme.fg-dim
-                            : root.problem ? Theme.danger
-                            : root.tool ? Theme.fg-muted
-                            : Theme.fg;
-                        font-size: root.tool || root.note ? Theme.fs-sm : Theme.fs-lg;
-                        font-weight: root.tool ? Theme.weight-title : Theme.weight-body;
-                        horizontal-alignment: root.note ? center : left;
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-xs;
                     }
-                }
-
-                if root.tool && root.data.detail != "": Text {
-                    text: root.data.detail;
-                    wrap: word-wrap;
-                    color: Theme.fg-dim;
-                    font-size: Theme.fs-xs;
                 }
             }
         }
@@ -201,8 +560,9 @@ export component AgentSidebar inherits Rectangle {
                 height: self.preferred-height;
                 spacing: 8px;
 
-                for row in Agent.rows: Bubble {
+                for row[index] in Agent.rows: Bubble {
                     data: row;
+                    position: index;
                 }
             }
         }
@@ -276,27 +636,69 @@ export component AgentSidebar inherits Rectangle {
     }
 
     // ── the request box ──
+    // A card: the words on top, growing with them, and a row under them of
+    // what to send with them - files, the model, the effort - and Send.
     box := Rectangle {
+        property <length> strip: Agent.style-name != "" ? 26px : 0px;
+        property <length> words: Math.min(132px, Math.max(22px, draft.preferred-height));
+
         y: root.height - self.height;
         width: root.width;
-        height: Math.min(160px, Math.max(44px, draft.preferred-height + 18px)) + 20px;
+        height: self.strip + self.words + 42px + 38px;
+
+        // The project's style, in a strip the card sits on.
+        if Agent.style-name != "": Rectangle {
+            x: 10px;
+            y: 6px;
+            width: parent.width - 20px;
+            height: 40px;
+            background: Theme.well;
+            border-radius: 14px;
+
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                height: 24px;
+                spacing: 6px;
+
+                VerticalLayout {
+                    alignment: center;
+                    Icon {
+                        glyph: Glyph.sparkle;
+                        size: 11px;
+                        tint: Theme.accent;
+                    }
+                }
+
+                Text {
+                    horizontal-stretch: 1;
+                    text: Agent.style-name;
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs-sm;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+            }
+        }
 
         Rectangle {
             x: 10px;
-            y: 10px;
+            y: parent.strip + 6px;
             width: parent.width - 20px;
-            height: parent.height - 20px;
+            height: parent.height - parent.strip - 22px;
             background: Theme.field;
-            border-radius: Theme.r;
+            border-radius: 14px;
             border-width: 1px;
-            border-color: draft.has-focus ? Theme.accent : Theme.line;
-            clip: true;
+            border-color: draft.has-focus ? Theme.line-strong : Theme.line;
+            drop-shadow-blur: 10px;
+            drop-shadow-offset-y: 2px;
+            drop-shadow-color: #00000033;
 
             draft := TextInput {
-                x: 10px;
-                y: 9px;
-                width: parent.width - 50px;
-                height: parent.height - 18px;
+                x: 14px;
+                y: 12px;
+                width: parent.width - 28px;
+                height: box.words;
                 color: Theme.fg;
                 font-size: Theme.fs-lg;
                 single-line: false;
@@ -313,27 +715,62 @@ export component AgentSidebar inherits Rectangle {
                 }
             }
 
-            if draft.text == "" && !draft.has-focus: Text {
-                x: 10px;
-                y: 9px;
+            if draft.text == "": Text {
+                x: 14px;
+                y: 12px;
                 text: I18n.t("agent.placeholder");
                 color: Theme.fg-dim;
                 font-size: Theme.fs-lg;
             }
 
-            IconButton {
-                x: parent.width - self.width - 6px;
-                y: parent.height - 32px;
-                height: 26px;
-                glyph: Agent.busy ? Glyph.stop : Glyph.arrow-up-right;
-                label: Agent.busy ? I18n.t("agent.stop") : I18n.t("agent.send");
-                accent: !Agent.busy && draft.text != "";
-                enabled: Agent.busy || draft.text != "";
-                clicked => {
-                    if (Agent.busy) {
-                        Agent.cancel();
-                    } else {
-                        root.submit();
+            // Files attached: their names go into the words being typed.
+            property <int> attached: Agent.attached-token;
+            changed attached => {
+                draft.text = draft.text == "" ? Agent.attached-text
+                    : draft.text + " " + Agent.attached-text;
+                draft.focus();
+                draft.set-selection-offsets(1000000, 1000000);
+            }
+
+            HorizontalLayout {
+                x: 8px;
+                y: parent.height - 38px;
+                width: parent.width - 16px;
+                height: 30px;
+                spacing: 4px;
+
+                RoundButton {
+                    glyph: Glyph.plus;
+                    label: I18n.t("agent.attach");
+                    clicked => { Agent.attach(); }
+                }
+
+                Chooser {
+                    options: Agent.models;
+                    current: Agent.model;
+                    picked(index) => { Agent.model-picked(index); }
+                }
+
+                Chooser {
+                    options: Agent.efforts;
+                    current: Agent.effort;
+                    bars: true;
+                    picked(index) => { Agent.effort-picked(index); }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                RoundButton {
+                    glyph: Agent.busy ? Glyph.stop : Glyph.chevron-up;
+                    label: Agent.busy ? I18n.t("agent.stop") : I18n.t("agent.send");
+                    filled: Agent.busy || draft.text != "";
+                    enabled: Agent.busy || draft.text != "";
+                    clicked => {
+                        if (Agent.busy) {
+                            Agent.cancel();
+                        } else {
+                            root.submit();
+                        }
                     }
                 }
             }
