@@ -102,6 +102,8 @@ export global Files {
     /// The header's folder button: the project's folder in the system's
     /// file manager.
     callback open-folder();
+    /// New video: the next episode, with its folder and its conversation.
+    callback new-video();
 }
 
 component MenuRow inherits Rectangle {
@@ -584,19 +586,19 @@ export component VideoList inherits Rectangle {
             for video[index] in Files.videos: Card {
                 video: video;
                 index: index;
+                // Picking a card puts its episode's conversation on
+                // screen (the app starts the episode if it has none yet),
+                // and an open storyboard turns to its own.
                 storyboard => {
                     Editor.tab-selected(index);
-                    if (video.folder != "") {
-                        Agent.thread-picked(video.folder, video.name);
-                    }
                     Files.storyboard = index;
-                    Files.storyboard-opened(video.folder);
+                    Files.storyboard-opened(Files.videos[index].folder);
                 }
                 picked => {
                     Editor.tab-selected(index);
-                    // An episode's card opens its own conversation.
-                    if (video.folder != "") {
-                        Agent.thread-picked(video.folder, video.name);
+                    if (Files.storyboard >= 0) {
+                        Files.storyboard = index;
+                        Files.storyboard-opened(Files.videos[index].folder);
                     }
                 }
                 menu(x, y) => {
@@ -631,7 +633,7 @@ export component VideoList inherits Rectangle {
 
                 add := TouchArea {
                     mouse-cursor: pointer;
-                    clicked => { Editor.tab-added(); }
+                    clicked => { Files.new-video(); }
                 }
             }
         }

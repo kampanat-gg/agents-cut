@@ -70,6 +70,54 @@ pub fn folder_of(project: &Path, name: &str) -> Option<String> {
         .map(|folder| format!("{FOLDER}/{folder}"))
 }
 
+/// The number a new episode takes: one past the highest a timeline's name
+/// or a folder under `episodes/` already has.
+pub fn next_number<'a>(project: &Path, names: impl IntoIterator<Item = &'a str>) -> u32 {
+    let folders: Vec<String> = std::fs::read_dir(project.join(FOLDER))
+        .map(|read| {
+            read.flatten()
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    names
+        .into_iter()
+        .filter_map(number_of)
+        .chain(folders.iter().filter_map(|folder| number_of(folder)))
+        .max()
+        .unwrap_or(0)
+        + 1
+}
+
+/// Starts episode `number`: its folder, `episodes/epNN-new/`, with a
+/// brief that names it and says it is an idea yet. The folder relative to
+/// the project.
+pub fn start(project: &Path, number: u32) -> Result<String, String> {
+    let folder = format!("{FOLDER}/ep{number:02}-new");
+    let dir = project.join(&folder);
+    std::fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
+    let brief = dir.join("brief.md");
+    if !brief.exists() {
+        std::fs::write(
+            &brief,
+            format!("---\ntitle: EP{number}\nstatus: idea\nsynopsis:\n---\n"),
+        )
+        .map_err(|error| format!("{}: {error}", brief.display()))?;
+    }
+    Ok(folder)
+}
+
+/// Whether two episode folders are the same episode: the same folder, or
+/// the same number after one was renamed ("ep04-new" is "ep04-lighthouse").
+pub fn same(a: &str, b: &str) -> bool {
+    let number = |folder: &str| {
+        Path::new(folder)
+            .file_name()
+            .and_then(|name| number_of(&name.to_string_lossy()))
+    };
+    a == b || number(a).is_some() && number(a) == number(b)
+}
+
 /// The front matter of `folder`'s `brief.md`; an empty brief when there
 /// is none.
 pub fn brief(project: &Path, folder: &str) -> Brief {
@@ -173,6 +221,23 @@ mod tests {
         assert_eq!(number_of("EP3 Flying Dutchman"), Some(3));
         assert_eq!(number_of("ep12 Lanna"), Some(12));
         assert_eq!(number_of("Timeline 1"), None);
+    }
+
+    #[test]
+    fn a_new_episode_takes_the_next_number_and_keeps_it_through_a_rename() {
+        let project = std::env::temp_dir().join(format!("concat-episodes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&project);
+        std::fs::create_dir_all(project.join("episodes/ep03-flying-dutchman")).expect("folder");
+        assert_eq!(next_number(&project, ["EP1 Kraken", "Timeline 1"]), 4);
+        let folder = start(&project, 4).expect("started");
+        assert_eq!(folder, "episodes/ep04-new");
+        assert_eq!(brief(&project, &folder).title, "EP4");
+        assert_eq!(brief(&project, &folder).status, "idea");
+        assert_eq!(next_number(&project, []), 5);
+        assert!(same("episodes/ep04-new", "episodes/ep04-lighthouse"));
+        assert!(!same("episodes/ep04-new", "episodes/ep05-new"));
+        assert!(!same("", "episodes/ep05-new"));
+        let _ = std::fs::remove_dir_all(&project);
     }
 
     #[test]

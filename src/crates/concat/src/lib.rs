@@ -759,6 +759,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         files.on_storyboard_closed(on_window!(|state| {
             state.files.close_storyboard();
         }));
+        files.on_new_video(on_window!(|state| {
+            state.new_video();
+        }));
         files.on_toggle(on_window!(|state, path: SharedString| {
             state.files.toggle(path.as_str());
         }));
@@ -1103,6 +1106,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         };
         state.selection.clear();
         state.apply(concat_project::Command::SelectTimeline { timeline_id: id });
+        state.follow_video();
     }));
     editor.on_tab_renamed(on_window!(|state, index: i32, name: SharedString| {
         let trimmed = name.trim().to_string();

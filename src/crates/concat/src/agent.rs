@@ -262,6 +262,9 @@ pub struct Chat {
     rows: Rc<VecModel<AgentRow>>,
     /// The open project's style's buttons, empty without a style.
     starters: Rc<VecModel<AgentStarter>>,
+    /// The channel's style's starters, shown in its own conversation; an
+    /// episode's shows ways into the episode instead.
+    style_starters: Vec<AgentStarter>,
     /// The Claude session to resume, once the first turn has named one.
     session: Option<String>,
     turn: Option<Turn>,
@@ -310,6 +313,7 @@ impl Default for Chat {
         Chat {
             rows: Rc::new(VecModel::default()),
             starters: Rc::new(VecModel::default()),
+            style_starters: Vec::new(),
             session: None,
             turn: None,
             epoch: 0,
@@ -408,7 +412,7 @@ impl Chat {
             current: self.thread.is_empty(),
         }];
         threads.extend(episodes.into_iter().map(|(key, title)| AgentThread {
-            current: key == self.thread,
+            current: crate::episodes::same(&key, &self.thread),
             key: key.into(),
             title: title.into(),
         }));
@@ -433,6 +437,7 @@ impl Chat {
             title.to_owned()
         };
         self.restore();
+        self.show_starters();
         true
     }
 
@@ -446,19 +451,43 @@ impl Chat {
     }
 
     /// Where the conversation on screen is kept: the project's hidden
-    /// `.concat/chats/`, one file a conversation.
+    /// `.concat/chats/`, one file a conversation, an episode's by its
+    /// number ("ep04"), so renaming its folder keeps it.
     fn saved_path(&self) -> Option<PathBuf> {
-        if self.folder.as_os_str().is_empty() {
-            return None;
-        }
         let name = if self.thread.is_empty() {
             "channel".to_owned()
         } else {
+            let folder = self.folder_name()?;
+            match crate::episodes::number_of(&folder) {
+                Some(number) => format!("ep{number:02}"),
+                None => folder,
+            }
+        };
+        self.chat_file(&name)
+    }
+
+    /// Where an episode's conversation was kept before it was kept by
+    /// number: under its folder's whole name.
+    fn legacy_path(&self) -> Option<PathBuf> {
+        if self.thread.is_empty() {
+            return None;
+        }
+        self.chat_file(&self.folder_name()?)
+    }
+
+    fn folder_name(&self) -> Option<String> {
+        Some(
             Path::new(&self.thread)
                 .file_name()?
                 .to_string_lossy()
-                .into_owned()
-        };
+                .into_owned(),
+        )
+    }
+
+    fn chat_file(&self, name: &str) -> Option<PathBuf> {
+        if self.folder.as_os_str().is_empty() {
+            return None;
+        }
         Some(
             self.folder
                 .join(".concat")
@@ -525,9 +554,10 @@ impl Chat {
         self.groups.clear();
         self.tools.clear();
         self.session = None;
-        let saved: SavedThread = self
-            .saved_path()
-            .and_then(|path| std::fs::read_to_string(path).ok())
+        let saved: SavedThread = [self.saved_path(), self.legacy_path()]
+            .into_iter()
+            .flatten()
+            .find_map(|path| std::fs::read_to_string(path).ok())
             .and_then(|text| serde_json::from_str(&text).ok())
             .unwrap_or_default();
         self.session = saved.session;
@@ -586,6 +616,29 @@ impl Chat {
                     .collect()
             })
             .unwrap_or_default();
+        self.style_starters = starters;
+        self.show_starters();
+    }
+
+    /// The starters for the conversation on screen: the style's in the
+    /// channel's, and in an episode's a way to say what it is about.
+    fn show_starters(&self) {
+        let starters = if self.thread.is_empty() {
+            self.style_starters.clone()
+        } else {
+            vec![
+                AgentStarter {
+                    label: t("agent.episodeHave").into(),
+                    prompt: t("agent.episodeHavePrompt").into(),
+                    fill: true,
+                },
+                AgentStarter {
+                    label: t("agent.episodeFind").into(),
+                    prompt: t("agent.episodeFindPrompt").into(),
+                    fill: false,
+                },
+            ]
+        };
         self.starters.set_vec(starters);
     }
 
@@ -637,6 +690,7 @@ impl Chat {
     pub fn publish(&self, app: &App) {
         let agent = app.global::<Agent>();
         agent.set_thread_title(self.thread_title.as_str().into());
+        agent.set_in_episode(!self.thread.is_empty());
         agent.set_codex_ready(CODEX_READY.load(std::sync::atomic::Ordering::Relaxed));
         agent.set_elevenlabs_ready(!voice_servers().is_empty());
         agent.set_voice_set(self.voice.is_some());

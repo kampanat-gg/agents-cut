@@ -580,6 +580,77 @@ impl Studio {
         crate::studio::sync(&self.files.videos, cards);
     }
 
+    /// The side panel's New video: a timeline, on screen, started as the
+    /// next episode with its conversation open, so the user can say what
+    /// it is about straight away.
+    pub fn new_video(&mut self) {
+        let Some(id) = self.apply(concat_project::Command::AddTimeline) else {
+            return;
+        };
+        self.selection.clear();
+        self.apply(concat_project::Command::SelectTimeline { timeline_id: id });
+        self.follow_video();
+    }
+
+    /// Puts the video on screen's conversation in the sidebar: its
+    /// episode's, after starting it as the next episode - its number on
+    /// its name, its folder and brief - when it is not one yet. A project
+    /// with no folder has nowhere to keep one, and stays as it is.
+    pub fn follow_video(&mut self) {
+        let Some(project) = self.files.folder.clone() else {
+            return;
+        };
+        let (id, name) = {
+            let doc = self.project();
+            let Some(timeline) = doc
+                .timelines
+                .iter()
+                .find(|timeline| timeline.id == doc.active_timeline_id)
+            else {
+                return;
+            };
+            (timeline.id.clone(), timeline.name.clone())
+        };
+        let (folder, name) = match self.files.episode(&name).0 {
+            Some(folder) => (folder, name),
+            None => {
+                let number = crate::episodes::next_number(
+                    &project,
+                    self.project()
+                        .timelines
+                        .iter()
+                        .map(|timeline| timeline.name.as_str()),
+                );
+                let folder = match crate::episodes::start(&project, number) {
+                    Ok(folder) => folder,
+                    Err(error) => {
+                        self.notify(&error, true);
+                        return;
+                    }
+                };
+                // "Timeline 2" says nothing an episode number does not; a
+                // name the user gave stays after the number.
+                let untitled = name
+                    .strip_prefix("Timeline")
+                    .is_some_and(|rest| rest.trim().chars().all(|c| c.is_ascii_digit()));
+                let renamed = if untitled {
+                    format!("EP{number}")
+                } else {
+                    format!("EP{number} {name}")
+                };
+                self.apply(concat_project::Command::RenameTimeline {
+                    timeline_id: id,
+                    name: renamed.clone(),
+                });
+                (folder, renamed)
+            }
+        };
+        if !self.agent.switch_thread(&folder, &name) {
+            self.notify(&crate::i18n::t("agent.busySwitch"), false);
+        }
+        self.publish_videos();
+    }
+
     /// A file of the project's laid on the timeline: onto `track_id` at
     /// `start`, or at `start` on the first lane with room. It joins the
     /// bin first if it is not in it.

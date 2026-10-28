@@ -27,6 +27,11 @@ says more and wins.
   ("EP2 Ghost Ship" is `episodes/ep02-ghost-ship/`): everything made for
   it goes there, so a video's files can be found, moved or thrown away
   together.
+- The user's New video button starts one for you: a timeline named
+  `EP<number>`, its folder `episodes/ep<two digits>-new/` with a brief of
+  status `idea`, and that episode's conversation. Once its subject is
+  settled, rename the timeline `EP<number> <short title>`, the folder
+  `ep<two digits>-<short-name>`, and fill in its brief.
 - Open on the hook within the first 2 seconds: the most surprising fact,
   question or picture, as big text over the strongest image.
 - Something changes on screen every 2 to 3 seconds: a cut, a move, a word.

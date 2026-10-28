@@ -102,6 +102,8 @@ export global Agent {
     callback mention(words: string);
     /// The conversation on screen, and the ones to switch to.
     in-out property <string> thread-title;
+    /// The conversation on screen is an episode's, not the channel's.
+    in-out property <bool> in-episode;
     in-out property <[AgentThread]> threads;
     callback thread-picked(key: string, title: string);
     /// The sidebar's width, which its edge drags.
@@ -896,7 +898,7 @@ export component AgentSidebar inherits Rectangle {
                 VerticalLayout {
                     alignment: center;
                     Icon {
-                        glyph: Agent.thread-title == I18n.t("agent.channelChat") ? Glyph.sparkle : Glyph.film;
+                        glyph: Agent.in-episode ? Glyph.film : Glyph.sparkle;
                         size: 13px;
                         tint: Theme.fg-muted;
                     }
@@ -1047,7 +1049,7 @@ export component AgentSidebar inherits Rectangle {
             }
 
             Text {
-                text: I18n.t("agent.emptyPrompt");
+                text: Agent.in-episode ? I18n.t("agent.episodeEmpty") : I18n.t("agent.emptyPrompt");
                 color: Theme.fg-muted;
                 font-size: Theme.fs;
                 horizontal-alignment: center;
