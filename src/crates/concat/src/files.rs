@@ -105,6 +105,9 @@ pub struct Files {
     story: Option<(String, Option<SystemTime>)>,
     beats: Rc<VecModel<StoryBeat>>,
     folder: Option<PathBuf>,
+    /// When each file in the bin was last changed, as last seen: a file
+    /// changed since is drawn again (see [`Studio::poll_files`]).
+    stamps: HashMap<PathBuf, SystemTime>,
     listed: Vec<Entry>,
     /// Folders listed open, and every folder seen, so one that appears
     /// later is opened or not by its depth only the first time.
@@ -135,6 +138,7 @@ impl Default for Files {
             story: None,
             beats: Rc::new(VecModel::default()),
             folder: None,
+            stamps: HashMap::new(),
             listed: Vec::new(),
             open: HashSet::new(),
             seen: HashSet::new(),
@@ -224,7 +228,7 @@ impl Files {
         };
         self.refresh();
         self.timer.start(slint::TimerMode::Repeated, EVERY, || {
-            Shell::with(|shell, _| shell.studio.borrow_mut().files.refresh());
+            Shell::with(|shell, _| shell.studio.borrow_mut().poll_files());
         });
     }
 
@@ -528,6 +532,51 @@ impl Files {
 }
 
 impl Studio {
+    /// What the timer does every few seconds: lists the folder again, and
+    /// lets go of what is cached of any file in the bin that changed on
+    /// disk - a code clip or an SVG rewritten, a picture Codex drew
+    /// again under its old name - so the monitor shows it as it is now.
+    pub fn poll_files(&mut self) {
+        self.files.refresh();
+        let Some(folder) = self.files.folder.clone() else {
+            return;
+        };
+        let mut changed = Vec::new();
+        let mut stamps = HashMap::new();
+        for item in &self.project().media {
+            let path = folder.join(&item.path);
+            let Some(stamp) = std::fs::metadata(&path)
+                .ok()
+                .and_then(|meta| meta.modified().ok())
+            else {
+                continue;
+            };
+            if self
+                .files
+                .stamps
+                .get(&path)
+                .is_some_and(|seen| *seen != stamp)
+            {
+                changed.push(path.clone());
+            }
+            stamps.insert(path, stamp);
+        }
+        self.files.stamps = stamps;
+        if changed.is_empty() {
+            return;
+        }
+        let pool = concat_host::scheduler().pool();
+        for path in &changed {
+            log::info!(
+                "files: {} changed on disk; drawing it again",
+                path.display()
+            );
+            pool.forget(path);
+        }
+        self.host.monitor.forget_plan();
+        self.request_preview();
+    }
+
     /// The side panel's cards: each timeline, with the picture of the
     /// earliest clip on it that has one - the bin's own thumbnail of its
     /// file, made for the bin whether it is on screen or not.

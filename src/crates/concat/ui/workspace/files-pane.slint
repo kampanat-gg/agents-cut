@@ -545,8 +545,10 @@ component Card inherits Rectangle {
                 }
             }
         }
-        // An episode with no storyboard yet: the first step, on the card.
-        if root.video.folder != "" && !root.video.boarded: HorizontalLayout {
+        // An episode not made yet - empty, or an idea - with no storyboard:
+        // the first step, on the card. One already built has no use for it.
+        if root.video.folder != "" && !root.video.boarded
+            && (root.video.seconds == 0 || root.video.status == "idea"): HorizontalLayout {
             alignment: start;
             padding-top: 4px;
             Rectangle {

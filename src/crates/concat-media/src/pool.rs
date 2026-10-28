@@ -758,9 +758,14 @@ impl ReaderPool {
         self.proxies.lock().ok()?.get(original).cloned()
     }
 
-    /// Drops every cached frame cut from `path` and its probed facts: for
-    /// a file that changed on disk.
+    /// Drops every cached frame cut from `path`, its probed facts and its
+    /// warm readers: for a file that changed on disk. A reader kept open
+    /// would go on decoding the file as it was - an SVG's old drawing, a
+    /// code clip's old frames.
     pub fn forget(&self, path: &Path) {
+        if let Ok(mut readers) = self.readers.lock() {
+            readers.warm.retain(|warm| warm.key.0 != path);
+        }
         if let Ok(mut sources) = self.sources.lock() {
             sources.drop_where(|key| key.path == path);
         }
