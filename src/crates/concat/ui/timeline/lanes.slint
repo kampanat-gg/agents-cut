@@ -1247,6 +1247,25 @@ export component Lanes inherits Rectangle {
     /// says so, and only its own token moves.
     property <bool> asked;
     property <int> own-token;
+    /// The keyboard's way to a clip's menu: opened at the clip, through the
+    /// same round trip as a right-click on it.
+    in property <int> key-menu-token;
+    in property <string> key-menu-clip;
+    in property <float> key-menu-start;
+    in property <int> key-menu-row;
+    /// The open menu came from the keyboard: it takes the keys, so the
+    /// arrows and Return pick a row.
+    property <bool> keyed;
+    changed key-menu-token => {
+        if (root.key-menu-clip == "" || root.key-menu-row >= root.tracks.length) {
+            return;
+        }
+        menu.request-x = Math.clamp(root.at(root.key-menu-start) + 12px, 0px, root.width);
+        menu.request-y = root.row-y(root.key-menu-row) + 16px;
+        root.keyed = true;
+        root.asked = true;
+        root.clip-context(root.key-menu-clip);
+    }
     changed menu-token => {
         if (root.asked) {
             root.asked = false;
@@ -1680,6 +1699,7 @@ export component Lanes inherits Rectangle {
                 // returns, so the token can arrive inside it.
                 menu.request-x = wheel.mouse-x;
                 menu.request-y = wheel.mouse-y;
+                root.keyed = false;
                 root.asked = true;
                 root.clip-context(entry.id);
             }
@@ -1962,6 +1982,7 @@ export component Lanes inherits Rectangle {
             items: root.menu-items;
             menu-height: root.menu-height;
             token: root.own-token;
+            keyboard: root.keyed;
             selected(id) => { root.menu-selected(id); }
         }
 

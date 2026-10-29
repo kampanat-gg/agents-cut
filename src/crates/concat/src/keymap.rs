@@ -94,6 +94,10 @@ pub const ACTIONS: &[Action] = &[
         defaults: &["ctrl+b"],
     },
     Action {
+        id: "clip-menu",
+        defaults: &["shift+f10"],
+    },
+    Action {
         id: "delete",
         defaults: &["delete", "backspace"],
     },
@@ -208,6 +212,7 @@ pub fn name(id: &str) -> String {
         "paste" => i18n::t("studio.paste"),
         "duplicate" => i18n::t("studio.duplicate"),
         "split" => i18n::t("studio.splitAtPlayhead"),
+        "clip-menu" => i18n::t("shortcuts.clipMenu"),
         "delete" => i18n::t("common.delete"),
         "ripple-delete" => i18n::t("shortcuts.rippleDelete"),
         "freeze" => i18n::t("timelinePane.freeze"),

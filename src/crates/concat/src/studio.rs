@@ -919,6 +919,10 @@ pub struct Studio {
     /// and not a clip's: the two share one set of rows and one token.
     pub menu_media: Option<String>,
     pub menu_token: i32,
+    /// The clip the keyboard asked the menu of, and a count that tells the
+    /// lanes to open it; see `Editor.key-menu-token`.
+    key_menu: Option<String>,
+    key_menu_token: i32,
     /// The run of one kind of continuous message being folded into one
     /// line of the activity trail; see `note_activity`.
     activity_burst: Option<crate::panes::Burst>,
@@ -2409,6 +2413,8 @@ impl Studio {
             menu_target: None,
             menu_media: None,
             menu_token: 0,
+            key_menu: None,
+            key_menu_token: 0,
             activity_burst: None,
             toast: ToastState::default(),
             on_start: true,
@@ -11686,6 +11692,12 @@ impl Studio {
         editor.set_menu_height(Self::menu_height(&rows));
         sync(&models.menu, rows);
         editor.set_menu_token(self.menu_token);
+        if let Some(clip) = self.key_menu.as_deref().and_then(|id| self.clip(id)) {
+            editor.set_key_menu_clip(clip.id.as_str().into());
+            editor.set_key_menu_start(clip.start as f32);
+            editor.set_key_menu_row(self.row_of(&clip.track_id));
+        }
+        editor.set_key_menu_token(self.key_menu_token);
 
         app.set_export(self.export.data(self));
         app.set_settings(self.settings.data(self));
@@ -12635,6 +12647,14 @@ impl Studio {
             "delete-left" => self.delete_to_playhead(PlayheadSide::Left),
             "delete-right" => self.delete_to_playhead(PlayheadSide::Right),
             "select-all" => self.select_all(),
+            // Shift+F10, the keyboard's right-click: the selected clip's
+            // menu, opened at the clip.
+            "clip-menu" => {
+                if let Some(id) = self.selection.first().cloned() {
+                    self.key_menu = Some(id);
+                    self.key_menu_token += 1;
+                }
+            }
             // The phone's way out of the clip tools: nothing selected, the
             // way a press on an empty lane leaves it.
             "deselect" => {

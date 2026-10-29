@@ -115,6 +115,10 @@ export component TimelinePane inherits Rectangle {
     in property <[MenuItemData]> menu-items;
     in property <length> menu-height;
     in property <int> menu-token;
+    in property <int> key-menu-token;
+    in property <string> key-menu-clip;
+    in property <float> key-menu-start;
+    in property <int> key-menu-row;
     callback clip-context(id: string);
     callback menu-selected(id: string);
 
@@ -431,6 +435,10 @@ export component TimelinePane inherits Rectangle {
                 menu-items: root.menu-items;
                 menu-height: root.menu-height;
                 menu-token: root.menu-token;
+                key-menu-token: root.key-menu-token;
+                key-menu-clip: root.key-menu-clip;
+                key-menu-start: root.key-menu-start;
+                key-menu-row: root.key-menu-row;
                 clip-context(id) => { root.clip-context(id); }
                 menu-selected(id) => { root.menu-selected(id); }
                 band-selected(a, b, c, d, additive) => {

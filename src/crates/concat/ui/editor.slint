@@ -451,6 +451,13 @@ export global Editor {
     in-out property <int> menu-token;
     callback clip-context(id: string);
     callback menu-selected(id: string);
+    /// The keyboard asked for a clip's menu (Shift+F10): which clip, where
+    /// it starts and on which lane, and a bump each time. The lanes open it
+    /// at the clip, as a right-click there would.
+    in-out property <int> key-menu-token;
+    in-out property <string> key-menu-clip;
+    in-out property <float> key-menu-start;
+    in-out property <int> key-menu-row;
 
     callback band-selected(from-seconds: float, to-seconds: float,
         from-y: length, to-y: length, additive: bool);
