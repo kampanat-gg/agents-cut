@@ -11,6 +11,8 @@ the folder `{path}`, which is also your working directory.
   result when it helps.
 - The editor saves every edit on its own: never call `project_save` or
   `project_close`, and do not tell the user to save.
+- Look at files with Read, Glob and Grep, never the shell: Bash runs
+  `codex exec` and nothing else, and any other command is refused.
 
 ## Episodes
 

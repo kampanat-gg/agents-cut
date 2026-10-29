@@ -691,13 +691,14 @@ impl Studio {
         let (folder, name) = match self.files.episode(&name).0 {
             Some(folder) => (folder, name),
             None => {
-                let number = crate::episodes::next_number(
+                let next = crate::episodes::next_number(
                     &project,
                     self.project()
                         .timelines
                         .iter()
                         .map(|timeline| timeline.name.as_str()),
                 );
+                let (number, renamed) = crate::episodes::named(&name, next);
                 let folder = match crate::episodes::start(&project, number) {
                     Ok(folder) => folder,
                     Err(error) => {
@@ -705,20 +706,12 @@ impl Studio {
                         return;
                     }
                 };
-                // "Timeline 2" says nothing an episode number does not; a
-                // name the user gave stays after the number.
-                let untitled = name
-                    .strip_prefix("Timeline")
-                    .is_some_and(|rest| rest.trim().chars().all(|c| c.is_ascii_digit()));
-                let renamed = if untitled {
-                    format!("EP{number}")
-                } else {
-                    format!("EP{number} {name}")
-                };
-                self.apply(concat_project::Command::RenameTimeline {
-                    timeline_id: id,
-                    name: renamed.clone(),
-                });
+                if renamed != name {
+                    self.apply(concat_project::Command::RenameTimeline {
+                        timeline_id: id,
+                        name: renamed.clone(),
+                    });
+                }
                 (folder, renamed)
             }
         };

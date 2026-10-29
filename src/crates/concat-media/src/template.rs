@@ -503,6 +503,9 @@ impl<'a> Parser<'a> {
                 "frame" => Name::Frame,
                 "fps" => Name::Fps,
                 "pi" => Name::Pi,
+                _ if Function::named(word).is_some() => {
+                    return Err(format!("{word} is a function: write {word}(...)"));
+                }
                 _ => return Err(format!("no name '{word}' (t, d, p, frame, fps, pi)")),
             };
             return Ok(Expr::Name(name));
@@ -570,6 +573,79 @@ mod tests {
         assert_eq!(fill("{{ num(1234.567, 1) }}", 0.0), "1,234.6");
         assert_eq!(fill("{{ num(-950) }}", 0.0), "-950");
         assert_eq!(fill("{{ num(0.2) }}", 0.0), "0");
+    }
+
+    #[test]
+    fn the_edges_of_arithmetic_stay_numbers() {
+        // Nothing divides into infinity or NaN in an attribute.
+        assert_eq!(
+            fill("{{ 1 / 0 }} {{ 5 % 0 }} {{ pow(-8, 1 / 3) }}", 0.0),
+            "0 0 0"
+        );
+        assert_eq!(fill("{{ .5 * 2 }} {{ --t }} {{ -(-t) }}", 1.0), "1 1 1");
+        assert_eq!(fill("{{ t > 1 ? t < 2 ? 1 : 2 : 3 }}", 1.5), "1");
+        assert_eq!(fill("{{ t > 1 ? t < 2 ? 1 : 2 : 3 }}", 2.5), "2");
+        assert_eq!(fill("{{ t > 1 ? t < 2 ? 1 : 2 : 3 }}", 0.5), "3");
+        assert_eq!(
+            fill("{{ 1 < 2 }} {{ 2 <= 2 }} {{ 3 == 3 }} {{ 3 != 3 }}", 0.0),
+            "1 1 1 0"
+        );
+        assert_eq!(
+            fill("{{ round(-2.5) }} {{ round(1.23456789, 9) }}", 0.0),
+            "-3 1.235"
+        );
+        assert_eq!(
+            fill("{{ ease(-1) }} {{ ease(2) }} {{ between(t, 2, 2) }}", 2.0),
+            "0 1 1"
+        );
+        assert_eq!(fill("{{\n  t\n  * 2\n}}", 1.0), "2");
+    }
+
+    #[test]
+    fn a_clip_of_no_length_is_at_its_end() {
+        let template = Template::parse("{{ p }}").expect("reads");
+        let moment = Moment {
+            t: 0.0,
+            d: 0.0,
+            frame: 0,
+            fps: 30.0,
+        };
+        assert_eq!(template.fill(moment), "1");
+    }
+
+    #[test]
+    fn num_rounds_and_groups_at_the_edges() {
+        assert_eq!(fill("{{ num(1000000000000) }}", 0.0), "1,000,000,000,000");
+        assert_eq!(fill("{{ num(-0.4) }}", 0.0), "0");
+        assert_eq!(fill("{{ num(999.96, 1) }}", 0.0), "1,000.0");
+        assert_eq!(fill("{{ num(999) }} {{ num(1000) }}", 0.0), "999 1,000");
+        assert_eq!(fill("{{ num(0.123456789, 9) }}", 0.0), "0.123457");
+    }
+
+    #[test]
+    fn words_around_the_holes_are_kept_as_written() {
+        assert_eq!(fill("ปลา{{ 1 + 1 }}ทู {{ 3 }}}", 0.0), "ปลา2ทู 3}");
+        assert_eq!(fill("a }} b", 0.0), "a }} b");
+        let error = Template::parse("ปลาทู\nแม่กลอง\n<x a=\"{{ T }}\"/>").expect_err("T");
+        assert!(error.starts_with("line 3:"), "{error}");
+    }
+
+    #[test]
+    fn what_is_not_an_expression_says_so() {
+        for (source, why) in [
+            ("{{}}", "ends too soon"),
+            ("{{ 1e3 }}", "did not expect 'e'"),
+            ("{{ 1.2.3 }}", "is not a number"),
+            ("{{ t = 1 }}", "did not expect '='"),
+            ("{{ {{ t }} }}", "did not expect '{'"),
+            ("{{ (t }}", "no ) after it"),
+            ("{{ t ? 1 }}", "no : after it"),
+            ("{{ ease(t, 1) }}", "takes 1 to 1"),
+            ("{{ ease t }}", "ease is a function: write ease(...)"),
+        ] {
+            let error = Template::parse(source).expect_err(source);
+            assert!(error.contains(why), "{source}: {error}");
+        }
     }
 
     #[test]

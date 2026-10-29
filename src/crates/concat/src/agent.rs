@@ -23,6 +23,7 @@
 //! and timed, under a header that says what is happening now and for how
 //! long, folding to a one-line summary once the agent speaks again.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -303,7 +304,7 @@ pub struct Chat {
     /// Which conversation is on screen: "" the channel's, or an episode's
     /// folder ("episodes/ep03-flying-dutchman"), and what it is called.
     thread: String,
-    thread_title: String,
+    thread_title: RefCell<String>,
     /// The conversations to switch between, for the sidebar's header.
     threads: Rc<VecModel<AgentThread>>,
 }
@@ -332,7 +333,7 @@ impl Default for Chat {
             voice: None,
             voices: Rc::new(VecModel::default()),
             thread: String::new(),
-            thread_title: String::new(),
+            thread_title: RefCell::new(String::new()),
             threads: Rc::new(VecModel::default()),
         }
     }
@@ -411,11 +412,19 @@ impl Chat {
             title: t("agent.channelChat").into(),
             current: self.thread.is_empty(),
         }];
-        threads.extend(episodes.into_iter().map(|(key, title)| AgentThread {
-            current: crate::episodes::same(&key, &self.thread),
-            key: key.into(),
-            title: title.into(),
-        }));
+        for (key, title) in episodes {
+            let current = crate::episodes::same(&key, &self.thread);
+            // The episode on screen renamed - by the agent, or in its
+            // card - is named so in the header and in the next turn's note.
+            if current && *self.thread_title.borrow() != title {
+                *self.thread_title.borrow_mut() = title.clone();
+            }
+            threads.push(AgentThread {
+                current,
+                key: key.into(),
+                title: title.into(),
+            });
+        }
         crate::studio::sync(&self.threads, threads);
     }
 
@@ -431,7 +440,7 @@ impl Chat {
         }
         self.save();
         self.thread = key.to_owned();
-        self.thread_title = if key.is_empty() {
+        *self.thread_title.borrow_mut() = if key.is_empty() {
             t("agent.channelChat")
         } else {
             title.to_owned()
@@ -446,7 +455,10 @@ impl Chat {
         if self.thread.is_empty() {
             t("agent.channelNote")
         } else {
-            tf("agent.episodeNote", &[&self.thread_title, &self.thread])
+            tf(
+                "agent.episodeNote",
+                &[&*self.thread_title.borrow(), &self.thread],
+            )
         }
     }
 
@@ -503,6 +515,11 @@ impl Chat {
         let Some(path) = self.saved_path() else {
             return;
         };
+        // A conversation only looked at leaves no file behind; one that
+        // had words and was cleared is written, empty, over its old self.
+        if self.rows.row_count() == 0 && self.session.is_none() && !path.exists() {
+            return;
+        }
         let rows: Vec<SavedRow> = (0..self.rows.row_count())
             .filter_map(|index| self.rows.row_data(index).map(|row| (index, row)))
             .map(|(index, row)| {
@@ -600,7 +617,7 @@ impl Chat {
         self.load_voice();
         // The channel's conversation, as it was left.
         self.thread = String::new();
-        self.thread_title = t("agent.channelChat");
+        *self.thread_title.borrow_mut() = t("agent.channelChat");
         self.restore();
         let style = crate::styles::of_project(folder);
         let starters: Vec<AgentStarter> = style
@@ -689,7 +706,7 @@ impl Chat {
     /// Writes what the sidebar shows that is not a row.
     pub fn publish(&self, app: &App) {
         let agent = app.global::<Agent>();
-        agent.set_thread_title(self.thread_title.as_str().into());
+        agent.set_thread_title(self.thread_title.borrow().as_str().into());
         agent.set_in_episode(!self.thread.is_empty());
         agent.set_codex_ready(CODEX_READY.load(std::sync::atomic::Ordering::Relaxed));
         agent.set_elevenlabs_ready(!voice_servers().is_empty());
@@ -803,7 +820,10 @@ impl Chat {
             return;
         };
         let running = group.steps.iter().rposition(|step| step.state == 0);
-        let failed = group.steps.iter().any(|step| step.state == 2);
+        // Failed when the work ended on a failure. A step the agent got
+        // past - a refused command, a file that was not there - keeps its
+        // own mark in the list, but the block is not a failure for it.
+        let failed = group.steps.last().is_some_and(|step| step.state == 2);
         let span = if group.live {
             group.began.elapsed()
         } else {
@@ -1770,6 +1790,40 @@ mod tests {
         assert!(expand("/storyboard about eels").ends_with("\n\nabout eels"));
         assert_eq!(expand("/storyboards"), "/storyboards");
         assert_eq!(expand("Make it shorter"), "Make it shorter");
+    }
+
+    #[test]
+    fn choices_at_their_edges() {
+        // Left open at the end of the reply: the lines after it are the choices.
+        let (words, choices) = split_choices("Pick:\n```choices\n- A\n- B");
+        assert_eq!((words.as_str(), choices.len()), ("Pick:", 2));
+        // An empty block is no choices, and the words stay.
+        let (words, choices) = split_choices("Pick:\n```choices\n\n```");
+        assert_eq!((words.as_str(), choices.is_empty()), ("Pick:", true));
+        // Nothing but choices: no words to show above them.
+        let (words, choices) = split_choices("```choices\n- Yes\n- No\n```");
+        assert_eq!(
+            (words.as_str(), choices),
+            ("", vec!["Yes".to_owned(), "No".to_owned()])
+        );
+        // A numbered list keeps a dot that is not its number's.
+        let (_, choices) = split_choices("```choices\n1. Mr. Smith's ship\n2. 3.5 tonnes\n```");
+        assert_eq!(choices, ["Mr. Smith's ship", "3.5 tonnes"]);
+        // Other code blocks are left alone.
+        let (words, choices) = split_choices("```\ncode\n```");
+        assert_eq!(
+            (words.as_str(), choices.is_empty()),
+            ("```\ncode\n```", true)
+        );
+    }
+
+    #[test]
+    fn commands_at_their_edges() {
+        assert!(expand("/build").starts_with("Build this episode"));
+        assert!(expand("/build\nfaster please").ends_with("\n\nfaster please"));
+        assert_eq!(expand(" /storyboard"), " /storyboard");
+        assert_eq!(expand("/STORYBOARD"), "/STORYBOARD");
+        assert_eq!(expand("/"), "/");
     }
 
     #[test]

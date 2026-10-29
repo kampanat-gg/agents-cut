@@ -44,6 +44,9 @@ const MOTION_LONG_SIDE: f32 = 1920.0;
 /// `<svg>` does not say (`data-duration`, `data-fps`).
 const MOTION_SECONDS: f64 = 4.0;
 const MOTION_FPS: f64 = 30.0;
+/// The longest a code clip runs: thirty seconds is 900 frames, drawn in
+/// about half a minute before it plays. Longer is a job for a timeline.
+const MOTION_MOST_SECONDS: f64 = 30.0;
 
 /// Whether `path` names an SVG, by its extension.
 pub fn is_svg(path: &Path) -> bool {
@@ -205,16 +208,26 @@ fn attribute(source: &str, name: &str) -> Option<f64> {
     source[start..end].trim().trim_end_matches('s').parse().ok()
 }
 
-/// Draws the code clip in `source` a frame at a time into `out`.
-fn bake(source: &str, folder: Option<&Path>, out: &Path) -> std::result::Result<(), String> {
-    let template = Template::parse(source)?;
+/// How long a code clip runs and how many frames a second, from its
+/// `<svg>`: at most [`MOTION_MOST_SECONDS`], since every frame is drawn
+/// before the clip can play, and 1 to 60 frames a second.
+fn timing(source: &str) -> (f64, f64) {
     let seconds = attribute(source, "data-duration")
+        .filter(|seconds| seconds.is_finite())
         .unwrap_or(MOTION_SECONDS)
-        .clamp(0.1, 120.0);
+        .clamp(0.1, MOTION_MOST_SECONDS);
     let fps = attribute(source, "data-fps")
+        .filter(|fps| fps.is_finite())
         .unwrap_or(MOTION_FPS)
         .round()
         .clamp(1.0, 60.0);
+    (seconds, fps)
+}
+
+/// Draws the code clip in `source` a frame at a time into `out`.
+fn bake(source: &str, folder: Option<&Path>, out: &Path) -> std::result::Result<(), String> {
+    let template = Template::parse(source)?;
+    let (seconds, fps) = timing(source);
     let frames = ((seconds * fps).round() as u64).max(1);
     let options = options(folder);
     let read = |frame: u64| {
@@ -378,6 +391,64 @@ mod tests {
         let error = readable(&svg).expect_err("a bad hole").to_string();
         assert!(error.contains("no function 'wobble'"), "{error}");
         let _ = std::fs::remove_file(&baked);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_code_clip_says_how_long_it_runs_within_bounds() {
+        let svg = |attributes: &str| format!("<svg {attributes}>{{{{ t }}}}</svg>");
+        assert_eq!(timing(&svg("")), (4.0, 30.0));
+        assert_eq!(
+            timing(&svg(r#"data-duration="2s" data-fps="24""#)),
+            (2.0, 24.0)
+        );
+        assert_eq!(
+            timing(&svg(r#"data-duration="abc" data-fps="x""#)),
+            (4.0, 30.0)
+        );
+        assert_eq!(
+            timing(&svg(r#"data-duration="0" data-fps="0""#)),
+            (0.1, 1.0)
+        );
+        assert_eq!(
+            timing(&svg(r#"data-duration="-3" data-fps="-5""#)),
+            (0.1, 1.0)
+        );
+        assert_eq!(
+            timing(&svg(r#"data-duration="500" data-fps="1000""#)),
+            (30.0, 60.0)
+        );
+        assert_eq!(
+            timing(&svg(r#"data-duration="inf" data-fps="NaN""#)),
+            (4.0, 30.0)
+        );
+        assert_eq!(timing(&svg(r#"data-duration=" 1.5 ""#)), (1.5, 30.0));
+    }
+
+    /// Sizes an encoder refuses - odd, a sliver, none at all - are drawn
+    /// at even sizes, the long side at the frame's.
+    #[test]
+    fn a_code_clip_of_any_shape_is_drawn_at_an_even_size() {
+        let dir = std::env::temp_dir().join(format!("concat-svg-sizes-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, root, expect) in [
+            ("odd", r#"viewBox="0 0 101 99""#, (1920, 1882)),
+            ("sliver", r#"viewBox="0 0 10000 1""#, (1920, 2)),
+            ("unsized", "", (1920, 1920)),
+        ] {
+            let svg = dir.join(format!("{name}.svg"));
+            std::fs::write(
+                &svg,
+                format!(
+                    r##"<svg xmlns="http://www.w3.org/2000/svg" {root} data-duration="0.2" data-fps="10"><rect width="{{{{ p * 50 }}}}" height="1" fill="#fff"/></svg>"##
+                ),
+            )
+            .unwrap();
+            let info = crate::probe(&svg).unwrap_or_else(|e| panic!("{name}: {e}"));
+            let video = info.video.expect("a picture");
+            assert_eq!((video.width, video.height), expect, "{name}");
+            let _ = std::fs::remove_file(readable(&svg).unwrap());
+        }
         let _ = std::fs::remove_dir_all(&dir);
     }
 

@@ -9432,7 +9432,6 @@ impl Studio {
     // ── publishing ──
 
     pub fn publish(&self, app: &App, models: &Models) {
-        self.agent.publish(app);
         // The tray's three menu labels and the tooltips' bare-letter
         // hints, spelled from the keymap so a rebind moves the words
         // with the key. An action left unbound shows an em dash rather
@@ -9458,6 +9457,9 @@ impl Studio {
         self.publish_lanes(app, models);
         self.publish_chrome(app, models);
         self.publish_dock(app, models);
+        // After the lanes: they list the videos, and with them the
+        // conversations' names, a renamed episode's among them.
+        self.agent.publish(app);
     }
 
     pub fn publish_dock(&self, _app: &App, models: &Models) {

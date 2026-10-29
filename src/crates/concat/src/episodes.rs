@@ -40,15 +40,36 @@ pub struct Beat {
     pub sound: String,
 }
 
-/// The episode number in a timeline's name: "EP3 Flying Dutchman" is 3.
+/// The episode number in a timeline's name: "EP3 Flying Dutchman" is 3,
+/// and so are "ep03-flying-dutchman", "EP 3" and "Ep.3".
 pub fn number_of(name: &str) -> Option<u32> {
     let rest = name.trim();
     let rest = rest
         .strip_prefix("EP")
         .or_else(|| rest.strip_prefix("Ep"))
         .or_else(|| rest.strip_prefix("ep"))?;
+    let rest = rest.trim_start_matches([' ', '.', '-', '_']);
     let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
     digits.parse().ok()
+}
+
+/// The number and name a video takes when it becomes an episode: the
+/// number its name already has, or `next`; a name that is only
+/// "Timeline 2" becomes the number alone, any other keeps its words
+/// after it.
+pub fn named(name: &str, next: u32) -> (u32, String) {
+    if let Some(number) = number_of(name) {
+        return (number, name.to_owned());
+    }
+    let untitled = name
+        .trim()
+        .strip_prefix("Timeline")
+        .is_some_and(|rest| rest.trim().chars().all(|c| c.is_ascii_digit()));
+    if untitled || name.trim().is_empty() {
+        (next, format!("EP{next}"))
+    } else {
+        (next, format!("EP{next} {}", name.trim()))
+    }
 }
 
 /// The folder of the episode a timeline named `name` is, relative to the
@@ -221,6 +242,24 @@ mod tests {
         assert_eq!(number_of("EP3 Flying Dutchman"), Some(3));
         assert_eq!(number_of("ep12 Lanna"), Some(12));
         assert_eq!(number_of("Timeline 1"), None);
+        assert_eq!(number_of("EP 4 Lanna"), Some(4));
+        assert_eq!(number_of("Ep.7"), Some(7));
+        assert_eq!(number_of("ep03-flying-dutchman"), Some(3));
+        assert_eq!(number_of("EPIC fails"), None);
+        assert_eq!(number_of("EP1 ก้าวเล็กๆ"), Some(1));
+    }
+
+    #[test]
+    fn a_video_becoming_an_episode_keeps_a_number_it_has() {
+        assert_eq!(named("EP1 ก้าวเล็กๆ", 6), (1, "EP1 ก้าวเล็กๆ".to_owned()));
+        assert_eq!(named("Timeline 2", 6), (6, "EP6".to_owned()));
+        assert_eq!(named("Timeline", 6), (6, "EP6".to_owned()));
+        assert_eq!(named("  ", 6), (6, "EP6".to_owned()));
+        assert_eq!(named("My intro", 6), (6, "EP6 My intro".to_owned()));
+        assert_eq!(
+            named("Timeline of Siam", 6),
+            (6, "EP6 Timeline of Siam".to_owned())
+        );
     }
 
     #[test]
