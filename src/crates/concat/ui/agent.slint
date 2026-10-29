@@ -20,6 +20,13 @@ export struct AgentStep {
     last: bool,
 }
 
+/// One task of the list the agent shows for a turn: `state` 0 to do, 1
+/// under way, 2 done.
+export struct AgentTask {
+    text: string,
+    state: int,
+}
+
 /// A conversation to switch to: the channel's (an empty key), or an
 /// episode's, by its folder.
 export struct AgentThread {
@@ -57,6 +64,8 @@ export struct AgentRow {
     brand: string,
     /// A "choices" row's answers to the question before it.
     choices: [string],
+    /// A "steps" row's task list, drawn over its steps.
+    tasks: [AgentTask],
 }
 
 
@@ -625,16 +634,82 @@ component StepMark inherits Rectangle {
     }
 }
 
+// The mark beside a task: a ring to do, a pulse while it is under way in
+// a turn that runs, a tick once done.
+component TaskMark inherits Rectangle {
+    in property <int> state;
+    in property <bool> live;
+
+    width: 14px;
+    height: 14px;
+
+    if root.state == 1 && root.live: Pulse {
+        x: 3px;
+        y: 3px;
+    }
+    if root.state == 0 || (root.state == 1 && !root.live): Rectangle {
+        x: 1px;
+        y: 1px;
+        width: 12px;
+        height: 12px;
+        border-radius: 6px;
+        border-width: 1.5px;
+        border-color: root.state == 1 ? Theme.fg-muted : Theme.line-strong;
+    }
+    if root.state == 2: Icon {
+        x: 0;
+        y: 0;
+        glyph: Glyph.check;
+        size: 13px;
+        tint: Theme.green;
+    }
+}
+
 // A block of steps: a header that says what is going on now and for how
-// long, and, open, each step under it on a line, with its time.
+// long, and, open, each step under it on a line, with its time. Over it,
+// the turn's task list when the agent showed one, which is what the turn
+// reads as; the header is then the way into the details.
 component Steps inherits Rectangle {
     in property <AgentRow> data;
     in property <int> position;
 
     height: column.preferred-height;
 
+    property <bool> listed: root.data.tasks.length > 0;
+
     column := VerticalLayout {
         spacing: 0px;
+
+        // ── the task list ──
+        if root.listed: VerticalLayout {
+            padding-top: 4px;
+            padding-bottom: 6px;
+            spacing: 7px;
+
+            for task in root.data.tasks: HorizontalLayout {
+                spacing: 9px;
+                padding-left: 2px;
+
+                VerticalLayout {
+                    alignment: start;
+                    padding-top: 2px;
+                    TaskMark {
+                        state: task.state;
+                        live: root.data.state == 0;
+                    }
+                }
+
+                Text {
+                    horizontal-stretch: 1;
+                    text: task.text;
+                    color: task.state == 2 ? Theme.fg-muted : Theme.fg;
+                    font-size: Theme.fs;
+                    font-weight: task.state == 1 && root.data.state == 0
+                        ? Theme.weight-title : Theme.weight-body;
+                    wrap: word-wrap;
+                }
+            }
+        }
 
         // ── the header ──
         Rectangle {
@@ -662,9 +737,9 @@ component Steps inherits Rectangle {
                 Text {
                     horizontal-stretch: 1;
                     text: root.data.text;
-                    color: root.data.state == 0 ? Theme.fg : Theme.fg-muted;
-                    font-size: Theme.fs;
-                    font-weight: Theme.weight-title;
+                    color: root.data.state == 0 && !root.listed ? Theme.fg : Theme.fg-muted;
+                    font-size: root.listed ? Theme.fs-sm : Theme.fs;
+                    font-weight: root.listed ? Theme.weight-body : Theme.weight-title;
                     vertical-alignment: center;
                     overflow: elide;
                 }

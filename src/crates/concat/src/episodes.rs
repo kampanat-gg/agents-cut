@@ -38,6 +38,9 @@ pub struct Beat {
     pub image: Option<PathBuf>,
     pub motion: String,
     pub sound: String,
+    /// The picture is made with code: its line starts `graphic`, or names
+    /// an SVG.
+    pub graphic: bool,
 }
 
 /// The episode number in a timeline's name: "EP3 Flying Dutchman" is 3,
@@ -213,13 +216,28 @@ fn parse_storyboard(text: &str) -> Vec<Beat> {
             "voice" | "narration" | "เสียงพากย์" | "พากย์" => {
                 beat.voice = value
             }
-            "picture" | "image" | "visual" | "ภาพ" => beat.picture = value,
+            "picture" | "image" | "visual" | "ภาพ" => {
+                beat.graphic = is_graphic(&value);
+                beat.picture = value;
+            }
             "motion" | "move" | "การเคลื่อนไหว" => beat.motion = value,
             "sound" | "music" | "sfx" | "เสียง" => beat.sound = value,
             _ => {}
         }
     }
     beats
+}
+
+/// Whether a beat's picture line is a picture made with code: "graphic -
+/// a map of …", or an SVG it names.
+fn is_graphic(picture: &str) -> bool {
+    let first = picture
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .trim_matches(['`', '"', ',', ':', '-'])
+        .to_lowercase();
+    first == "graphic" || first.ends_with(".svg")
 }
 
 /// The file a beat's picture line names, when it names one: its first
@@ -306,5 +324,18 @@ mod tests {
         assert_eq!(beats[0].sound, "a bell");
         assert_eq!(beats[1].title, "");
         assert_eq!(picture_file("a ship in fog"), None);
+        assert!(!beats[0].graphic);
+    }
+
+    #[test]
+    fn a_picture_made_with_code_is_a_graphic() {
+        assert!(is_graphic("graphic - map of the Cape"));
+        assert!(is_graphic("Graphic: the route"));
+        assert!(is_graphic("`graphics/map.svg` the route"));
+        assert!(!is_graphic("images/ship.png - a ship"));
+        assert!(!is_graphic("a graphic novel cover"));
+        assert!(!is_graphic(""));
+        let beats = parse_storyboard("## 0:00-0:03\n- Picture: graphic - a map\n");
+        assert!(beats[0].graphic);
     }
 }

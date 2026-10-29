@@ -20,7 +20,8 @@
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, Once, OnceLock};
+use std::time::{Duration, SystemTime};
 
 use concat_core::frame::Frame;
 use concat_core::time::{FrameRate, Rational};
@@ -48,6 +49,11 @@ const MOTION_FPS: f64 = 30.0;
 /// about half a minute before it plays. Longer is a job for a timeline.
 const MOTION_MOST_SECONDS: f64 = 30.0;
 
+/// How long a drawing no one has opened stays in the temporary folder.
+/// Every edit of an SVG leaves its last drawing behind, and a code clip's
+/// is megabytes; one opened is kept, since opening it marks it.
+const KEPT: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
 /// Whether `path` names an SVG, by its extension.
 pub fn is_svg(path: &Path) -> bool {
     path.extension()
@@ -55,6 +61,28 @@ pub fn is_svg(path: &Path) -> bool {
         .is_some_and(|extension| {
             extension.eq_ignore_ascii_case("svg") || extension.eq_ignore_ascii_case("svgz")
         })
+}
+
+/// Whether `path` is a code clip: an SVG with expressions of time in it.
+/// Read once for each size and time the file has had.
+pub fn is_code(path: &Path) -> bool {
+    if !is_svg(path) {
+        return false;
+    }
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    let key = drawing_of(path, &metadata);
+    static READ: Mutex<Option<std::collections::HashMap<PathBuf, bool>>> = Mutex::new(None);
+    let mut read = READ.lock().unwrap_or_else(|e| e.into_inner());
+    let read = read.get_or_insert_with(Default::default);
+    if let Some(code) = read.get(&key) {
+        return *code;
+    }
+    let code =
+        std::fs::read_to_string(path).is_ok_and(|source| crate::template::is_animated(&source));
+    read.insert(key, code);
+    code
 }
 
 /// What FFmpeg should open for `path`: the SVG's drawing, drawn now if it
@@ -69,11 +97,17 @@ pub fn readable(path: &Path) -> Result<PathBuf> {
     };
     let metadata = std::fs::metadata(path).map_err(|error| fail(error.to_string()))?;
     let drawn = drawing_of(path, &metadata);
+    static PRUNED: Once = Once::new();
+    if let Some(dir) = drawn.parent() {
+        PRUNED.call_once(|| prune(dir, SystemTime::now()));
+    }
     if drawn.is_file() {
+        keep(&drawn);
         return Ok(drawn);
     }
     let baked = drawn.with_extension(motion_codec().container());
     if baked.is_file() {
+        keep(&baked);
         return Ok(baked);
     }
     let bytes = std::fs::read(path).map_err(|error| fail(error.to_string()))?;
@@ -131,6 +165,38 @@ pub fn readable(path: &Path) -> Result<PathBuf> {
         }
     }
     Ok(drawn)
+}
+
+/// Marks a drawing as opened, so [`prune`] keeps it: its time moved to
+/// now, at most once a day.
+fn keep(file: &Path) {
+    let now = SystemTime::now();
+    let stale = std::fs::metadata(file)
+        .and_then(|meta| meta.modified())
+        .is_ok_and(|modified| {
+            now.duration_since(modified).unwrap_or_default() > Duration::from_secs(24 * 60 * 60)
+        });
+    if stale && let Ok(handle) = std::fs::File::options().write(true).open(file) {
+        let _ = handle.set_modified(now);
+    }
+}
+
+/// Takes out of `dir` the drawings no one has opened for [`KEPT`], and
+/// any half-written one an hour old, which a crash left there.
+fn prune(dir: &Path, now: SystemTime) {
+    let Ok(read) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in read.flatten() {
+        let Ok(modified) = entry.metadata().and_then(|meta| meta.modified()) else {
+            continue;
+        };
+        let age = now.duration_since(modified).unwrap_or_default();
+        let partial = entry.file_name().to_string_lossy().contains(".part");
+        if age > KEPT || partial && age > Duration::from_secs(60 * 60) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 /// Where the drawing of `path`, as it is now, lives: named for its path,
@@ -509,6 +575,49 @@ mod tests {
             "the placed picture is in the drawing"
         );
         let _ = std::fs::remove_file(&drawn);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn drawings_no_one_opened_for_a_week_are_taken_out() {
+        let dir = std::env::temp_dir().join(format!("concat-svg-prune-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("dir");
+        for name in ["old.webm", "new.webm", "a.1.part.webm"] {
+            std::fs::write(dir.join(name), b"x").expect("write");
+        }
+        let now = SystemTime::now();
+        prune(&dir, now + Duration::from_secs(2 * 60 * 60));
+        assert!(dir.join("old.webm").is_file());
+        assert!(!dir.join("a.1.part.webm").exists());
+        prune(&dir, now + KEPT + Duration::from_secs(60));
+        assert!(!dir.join("old.webm").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_opened_drawing_is_marked_kept() {
+        let dir = std::env::temp_dir().join(format!("concat-svg-keep-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("dir");
+        let file = dir.join("d.png");
+        std::fs::write(&file, b"x").expect("write");
+        let long_ago = SystemTime::now() - Duration::from_secs(3 * 24 * 60 * 60);
+        std::fs::File::options()
+            .write(true)
+            .open(&file)
+            .and_then(|handle| handle.set_modified(long_ago))
+            .expect("aged");
+        keep(&file);
+        let modified = std::fs::metadata(&file)
+            .and_then(|m| m.modified())
+            .expect("time");
+        assert!(
+            SystemTime::now()
+                .duration_since(modified)
+                .unwrap_or_default()
+                < Duration::from_secs(60)
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

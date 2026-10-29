@@ -9585,6 +9585,7 @@ impl Studio {
                             .selected_transition()
                             .is_some_and(|picked| picked.id == clip.id),
                         fx: clip.video_effects.iter().any(|effect| effect.enabled),
+                        code: self.code_of(&clip.media_id).is_some(),
                         transition_duration: clip
                             .transition_in
                             .as_ref()
@@ -12010,6 +12011,16 @@ impl Studio {
         ));
         rows.push(check("lock", &t("studio.lockTrack"), "", locked, true));
         rows.push(rule());
+        if self.code_of(&clip.media_id).is_some() {
+            rows.push(action(
+                "open-code",
+                t("files.openCode"),
+                Glyph::Book,
+                "",
+                true,
+            ));
+            rows.push(rule());
+        }
         rows.push(MenuItemData {
             id: "delete".into(),
             label: t("common.delete").into(),
@@ -12096,8 +12107,29 @@ impl Studio {
             ));
             rows.push(rule());
         }
+        if self.code_of(id).is_some() {
+            rows.push(action("open-code", t("files.openCode"), Glyph::Book, false));
+            rows.push(rule());
+        }
         rows.push(action("remove", t("common.remove"), Glyph::Trash, true));
         rows
+    }
+
+    /// The SVG a code clip is drawn from, when media `id` is one.
+    pub fn code_of(&self, id: &str) -> Option<std::path::PathBuf> {
+        let media = self.project().media_by_id(id)?;
+        let path = std::path::PathBuf::from(&media.path);
+        (media.kind == model::MediaKind::Video && concat_media::svg::is_svg(&path)).then_some(path)
+    }
+
+    /// Opens a code clip's SVG as text.
+    pub fn open_code(&mut self, id: &str) {
+        let Some(path) = self.code_of(id) else {
+            return;
+        };
+        if let Err(error) = platform::open_as_text(&path.to_string_lossy()) {
+            self.notify(&error, true);
+        }
     }
 
     /// A row of a bin card's menu, for the media it was opened on.
@@ -12121,6 +12153,7 @@ impl Studio {
             "range-auto" => {
                 self.apply(range(None));
             }
+            "open-code" => self.open_code(id),
             "range-limited" => {
                 self.apply(range(Some(model::ColorRange::Limited)));
             }
@@ -12718,6 +12751,7 @@ impl Studio {
         };
         match action {
             "copy" => self.copy_clips(Some(id)),
+            "open-code" => self.open_code(&clip.media_id),
             "duplicate" => self.duplicate_selected(),
             // Pasted after the clip that was right-clicked, on its lane.
             "paste" => self.paste_clips(Some(id)),

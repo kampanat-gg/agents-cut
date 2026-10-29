@@ -390,6 +390,8 @@ impl MediaBin {
                         .map(|extension| extension.to_ascii_lowercase())
                         .unwrap_or_default()
                         .into(),
+                    code: item.kind == model::MediaKind::Video
+                        && concat_media::svg::is_svg(std::path::Path::new(&item.path)),
                     thumbnail: self.thumbs.get(&item.id).cloned().unwrap_or_default(),
                     wave,
                     selected: self.selected.contains(&item.id),

@@ -780,6 +780,13 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
                     "add" => state.place_at_playhead(&format!("file:{path}")),
                     "mention" => state.agent.mention(&format!("@{path}")),
                     "open" => files::open(&mut state, path.as_str()),
+                    "open-code" => {
+                        if let Some(full) = state.files.full(path.as_str())
+                            && let Err(error) = platform::open_as_text(&full.to_string_lossy())
+                        {
+                            state.notify(&error, true);
+                        }
+                    }
                     "reveal" => {
                         if let Some(full) = state.files.full(path.as_str())
                             && let Err(error) = platform::reveal(&full.to_string_lossy())

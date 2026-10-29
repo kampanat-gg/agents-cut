@@ -788,6 +788,25 @@ pub fn pick_files(title: &str, filter: Option<(&str, &[&str])>) -> Option<Vec<Pa
     dialog.pick_files()
 }
 
+/// Opens a file as text, in the platform's text editor: a code clip's
+/// SVG, which would otherwise open as a picture in a browser.
+pub fn open_as_text(path: &str) -> Result<(), String> {
+    if MACOS {
+        std::process::Command::new("open")
+            .args(["-t", path])
+            .status()
+            .map_err(|error| error.to_string())
+            .and_then(|status| {
+                status
+                    .success()
+                    .then_some(())
+                    .ok_or_else(|| format!("open -t {path}: {status}"))
+            })
+    } else {
+        opener::open(path).map_err(|error| error.to_string())
+    }
+}
+
 /// Shows a written file in the platform's file manager.
 pub fn reveal(path: &str) -> Result<(), String> {
     opener::reveal(path).map_err(|error| error.to_string())

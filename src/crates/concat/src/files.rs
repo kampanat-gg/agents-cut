@@ -206,6 +206,7 @@ impl Files {
                     sound: beat.sound.into(),
                     has_image: picture.is_some(),
                     image: picture.unwrap_or_default(),
+                    graphic: beat.graphic,
                 }
             })
             .collect();
@@ -399,6 +400,10 @@ impl Files {
                     }
                     .into(),
                     placeable: !entry.folder && kind.placeable(),
+                    code: !entry.folder
+                        && self
+                            .full(&entry.path)
+                            .is_some_and(|full| concat_media::svg::is_code(&full)),
                     thumbed: thumb.size().width > 0,
                     thumb,
                 }

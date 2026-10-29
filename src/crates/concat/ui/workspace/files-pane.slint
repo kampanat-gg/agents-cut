@@ -37,6 +37,8 @@ export struct FileRow {
     meta: string,
     /// The timeline can take it.
     placeable: bool,
+    /// A code clip: an SVG with expressions of time in it.
+    code: bool,
     /// A picture's own, small, once it is made; `thumbed` says it is.
     thumb: image,
     thumbed: bool,
@@ -78,6 +80,8 @@ export struct StoryBeat {
     /// The picture's file, small, when the beat names one that is there.
     image: image,
     has-image: bool,
+    /// The picture is made with code: a `graphic` beat.
+    graphic: bool,
 }
 
 export global Files {
@@ -99,7 +103,8 @@ export global Files {
     callback toggle(path: string);
     /// A file double-clicked.
     callback activate(path: string);
-    /// A row of a file's menu: "add", "mention", "open" or "reveal".
+    /// A row of a file's menu: "add", "mention", "open", "open-code" or
+    /// "reveal".
     callback action(path: string, action: string);
     /// The header's folder button: the project's folder in the system's
     /// file manager.
@@ -205,13 +210,31 @@ component Line inherits Rectangle {
 
             Text {
                 x: root.indent + 38px;
-                width: parent.width - self.x - meta.width - 14px;
+                width: parent.width - self.x - meta.width - 14px
+                    - (root.line.code ? code-chip.width + 6px : 0px);
                 height: parent.height;
                 text: root.line.name;
                 color: Theme.fg;
                 font-size: Theme.fs-sm;
                 vertical-alignment: center;
                 overflow: elide;
+            }
+            code-chip := Rectangle {
+                visible: root.line.code;
+                x: meta.x - self.width - 6px;
+                y: (parent.height - self.height) / 2;
+                width: code-text.width + 8px;
+                height: 16px;
+                border-radius: Theme.r-xs;
+                background: Theme.field-active;
+                code-text := Text {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    text: "</>";
+                    color: Theme.kind-video;
+                    font-family: Theme.font-technical;
+                    font-size: Theme.fs-xs;
+                }
             }
             meta := Text {
                 x: parent.width - self.width - 8px;
@@ -330,6 +353,11 @@ export component FileList inherits Rectangle {
                     text: I18n.t("files.open");
                     glyph: Glyph.arrow-up-right;
                     chosen => { menu.close(); Files.action(root.menu-row.path, "open"); }
+                }
+                if root.menu-row.code: MenuRow {
+                    text: I18n.t("files.openCode");
+                    glyph: Glyph.book;
+                    chosen => { menu.close(); Files.action(root.menu-row.path, "open-code"); }
                 }
                 MenuRow {
                     text: I18n.t("files.reveal");
@@ -951,12 +979,30 @@ export component StoryboardView inherits Rectangle {
                             source: beat.image;
                             image-fit: cover;
                         }
-                        if !beat.has-image: Icon {
+                        if !beat.has-image && !beat.graphic: Icon {
                             x: (parent.width - self.width) / 2;
                             y: (parent.height - self.height) / 2;
                             glyph: Glyph.image;
                             size: 18px;
                             tint: Theme.fg-dim;
+                        }
+                        // A picture made with code: its mark, alone when
+                        // it is not drawn yet, in the corner when it is.
+                        if beat.graphic: Rectangle {
+                            x: beat.has-image ? 4px : (parent.width - self.width) / 2;
+                            y: beat.has-image ? 4px : (parent.height - self.height) / 2;
+                            width: graphic-mark.width + 8px;
+                            height: graphic-mark.height + 4px;
+                            border-radius: Theme.r-xs;
+                            background: beat.has-image ? Theme.scrim : transparent;
+                            graphic-mark := Text {
+                                x: (parent.width - self.width) / 2;
+                                y: (parent.height - self.height) / 2;
+                                text: "</>";
+                                color: beat.has-image ? Theme.on-scrim : Theme.kind-video;
+                                font-family: Theme.font-technical;
+                                font-size: beat.has-image ? Theme.fs-xs : Theme.fs-lg;
+                            }
                         }
                     }
 

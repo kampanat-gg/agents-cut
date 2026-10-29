@@ -79,6 +79,9 @@ pub enum Action {
     Mask,
     /// `preview.frame`, as an image.
     PreviewFrame,
+    /// The agent's list of tasks for the turn, which the window draws as a
+    /// checklist; nothing in the project changes.
+    Tasks,
 }
 
 /// How a reply is shown to the agent.
@@ -389,6 +392,15 @@ pub fn catalogue() -> Vec<Tool> {
             "clearTextStyles",
         ),
         Tool {
+            name: "tasks_show",
+            title: "Show the task list",
+            description: "Shows the user what you are doing as a short checklist instead of words between steps. Call it before work of more than two steps with every task (3 to 7, each a few words in the user's language, \"todo\"), then again with the whole list each time a task starts (\"doing\") or ends (\"done\"). The list replaces the one shown before.",
+            read_only: true,
+            destructive: false,
+            idempotent: true,
+            action: Action::Tasks,
+        },
+        Tool {
             name: "captions_add",
             title: "Add captions",
             description: "Places a run of captions in one undoable step: one title per entry, from `start` to `end` seconds, each on a lane above the picture. `style` applies to all of them (its `content` is ignored); without one they look like the window's captions - Kanit, weight 600, 0.045 of the frame high, with a thin black outline: legible in Thai and Latin. `offsetY` is where they sit, as a fraction of frame height from the centre: 0.35 (the default) is near the bottom, 0 the middle, -0.35 the top.",
@@ -639,6 +651,26 @@ fn input_schema(schemas: &Schemas, tool: &Tool) -> Option<Value> {
             Some(schema)
         }
         Action::PreviewFrame => schemas.method("preview.frame"),
+        Action::Tasks => Some(json!({
+            "type": "object",
+            "properties": {
+                "tasks": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 12,
+                    "description": "Every task, in order.",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "text": { "type": "string", "description": "The task, a few words." },
+                            "state": { "type": "string", "enum": ["todo", "doing", "done"] },
+                        },
+                        "required": ["text", "state"],
+                    },
+                },
+            },
+            "required": ["tasks"],
+        })),
         Action::Mask => {
             let update = schemas.command("updateClip")?;
             let mut mask = schemas.def("ClipMask")?;
@@ -748,11 +780,35 @@ fn run(tool: &Tool, arguments: Value, context: Context<'_>) -> Result<Outcome, A
         }
         Action::ExportWait => export_wait(arguments, backend, context.cancelled, context.progress),
         Action::PreviewFrame => preview(arguments, backend),
+        Action::Tasks => tasks_of(&arguments),
         Action::Mask => {
             let result = backend.call(mask(arguments)?)?;
             Ok(Outcome::json(summary::view(&result)))
         }
     }
+}
+
+/// `tasks_show`: the list as the window will draw it, checked.
+fn tasks_of(arguments: &Value) -> Result<Outcome, ApiError> {
+    let invalid = |why: &str| ApiError::invalid(format!("invalid arguments: {why}"));
+    let tasks = arguments["tasks"]
+        .as_array()
+        .filter(|tasks| !tasks.is_empty())
+        .ok_or_else(|| invalid("`tasks` is a list of at least one task"))?;
+    for task in tasks {
+        if task["text"]
+            .as_str()
+            .is_none_or(|text| text.trim().is_empty())
+        {
+            return Err(invalid("every task has its `text`"));
+        }
+        if !matches!(task["state"].as_str(), Some("todo" | "doing" | "done")) {
+            return Err(invalid(
+                "a task's `state` is \"todo\", \"doing\" or \"done\"",
+            ));
+        }
+    }
+    Ok(Outcome::json(json!({ "shown": tasks.len() })))
 }
 
 /// `clip_mask`: a clip patch with only its mask.
@@ -985,6 +1041,10 @@ mod tests {
             ("concat_version", json!({})),
             ("project_list", json!({})),
             (
+                "tasks_show",
+                json!({ "tasks": [{ "text": "Write the script", "state": "done" }, { "text": "Draw the pictures", "state": "doing" }] }),
+            ),
+            (
                 "project_create",
                 json!({ "location": "/tmp", "name": "Cut", "video": { "width": 1080, "height": 1920, "rateNum": 30, "rateDen": 1 } }),
             ),
@@ -1150,6 +1210,20 @@ mod tests {
         }
     }
 
+    /// A task list is shown only when every task has words and a state
+    /// the window knows.
+    #[test]
+    fn a_task_list_is_checked() {
+        let shown =
+            |tasks: Value| tasks_of(&json!({ "tasks": tasks })).map(|outcome| outcome.is_error);
+        assert!(shown(json!([{ "text": "Script", "state": "doing" }])).is_ok_and(|failed| !failed));
+        assert!(shown(json!([])).is_err());
+        assert!(shown(json!([{ "text": "  ", "state": "todo" }])).is_err());
+        assert!(shown(json!([{ "text": "Script", "state": "later" }])).is_err());
+        assert!(shown(json!([{ "text": "Script" }])).is_err());
+        assert!(tasks_of(&json!({})).is_err());
+    }
+
     /// The round trip: what each tool's schema accepts is what its Rust
     /// type reads, and what the Rust type writes the schema accepts.
     #[test]
@@ -1173,6 +1247,7 @@ mod tests {
                 }
                 Action::PreviewFrame => request("preview.frame", sample.clone()),
                 Action::Mask => mask(sample.clone()),
+                Action::Tasks => continue,
             };
             let built = built.unwrap_or_else(|error| panic!("{name}: {error}"));
             // Back again: the request as the API writes it fits the API's

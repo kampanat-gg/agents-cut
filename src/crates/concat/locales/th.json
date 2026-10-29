@@ -360,6 +360,7 @@
   "files.openFolder": "เปิดโฟลเดอร์โปรเจกต์",
   "files.openStoryboard": "Storyboard",
   "files.removeVideo": "ลบวิดีโอ",
+  "files.openCode": "เปิดโค้ด",
   "files.reveal": "แสดงใน Finder",
   "files.revisePrefix": "ใน storyboard ช่วย",
   "files.reviseStoryboard": "ให้ Claude แก้",

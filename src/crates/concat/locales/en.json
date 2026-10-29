@@ -360,6 +360,7 @@
   "files.openFolder": "Open the project's folder",
   "files.openStoryboard": "Storyboard",
   "files.removeVideo": "Remove video",
+  "files.openCode": "Open code",
   "files.reveal": "Show in Finder",
   "files.revisePrefix": "In the storyboard, ",
   "files.reviseStoryboard": "Change it with Claude",

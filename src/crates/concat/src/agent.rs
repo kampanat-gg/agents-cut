@@ -38,7 +38,9 @@ use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use crate::host::Shell;
 use crate::i18n::{t, tf};
 use crate::studio::Studio;
-use crate::ui::{Agent, AgentRow, AgentStarter, AgentStep, AgentThread, AgentVoice, App};
+use crate::ui::{
+    Agent, AgentRow, AgentStarter, AgentStep, AgentTask, AgentThread, AgentVoice, App,
+};
 use crate::voice::{self, Voice};
 
 /// The tools the agent may call: the editor's, and of the machine's only
@@ -163,6 +165,12 @@ const DETAIL_CHARS: usize = 160;
 /// user's words: `{path}` is the project's folder.
 const BRIEF: &str = include_str!("../agent/brief.md");
 
+/// Said after every request: the sidebar shows a turn as its task list,
+/// which only the agent can make.
+const TASKS_NOTE: &str = "Before your first tool call in a request that takes more than two, \
+     call tasks_show with the plan. Keep it current as you go, and write nothing between \
+     tool calls.";
+
 /// Added to [`BRIEF`] when Codex is installed: how to make pictures, in
 /// layers, cut out, and with a character kept the same. `{model}` is a
 /// `-m` for Codex, or nothing.
@@ -233,6 +241,40 @@ struct SavedRow {
     state: i32,
     #[serde(default)]
     steps: Vec<SavedStep>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    tasks: Vec<Task>,
+    /// How long a block of steps took, start to end.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    took_ms: Option<u64>,
+}
+
+/// One task of the list the agent shows for a turn; see `tasks_show`.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+struct Task {
+    text: String,
+    /// 0 to do, 1 under way, 2 done: [`AgentTask::state`].
+    state: i32,
+}
+
+/// The list a `tasks_show` call gives, or `None` when it gives none.
+fn tasks_of(input: &Value) -> Option<Vec<Task>> {
+    let tasks: Vec<Task> = input["tasks"]
+        .as_array()?
+        .iter()
+        .filter_map(|task| {
+            let text = task["text"].as_str()?.trim();
+            let state = match task["state"].as_str()? {
+                "doing" => 1,
+                "done" => 2,
+                _ => 0,
+            };
+            (!text.is_empty()).then(|| Task {
+                text: text.to_owned(),
+                state,
+            })
+        })
+        .collect();
+    (!tasks.is_empty()).then_some(tasks)
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -252,7 +294,13 @@ struct Group {
     /// The row it is drawn in.
     row: usize,
     steps: Vec<Step>,
+    /// The turn's task list, drawn over the steps; empty when the agent
+    /// showed none.
+    tasks: Vec<Task>,
     began: Instant,
+    /// How long it took, once it is over; read back with a saved
+    /// conversation, whose steps' own times say only how long each ran.
+    took: Option<Duration>,
     /// Steps are still being added: the agent has not spoken since.
     live: bool,
     open: bool,
@@ -273,6 +321,9 @@ pub struct Chat {
     epoch: u64,
     /// Every block of steps, in the order they appear.
     groups: Vec<Group>,
+    /// The first row of the turn running, past the user's words: rows
+    /// from here on are this turn's.
+    turn_row: usize,
     /// Where each running tool call is drawn: its block and its step.
     tools: HashMap<String, (usize, usize)>,
     /// Redraws the open block's clock once a second while a turn runs.
@@ -319,6 +370,7 @@ impl Default for Chat {
             turn: None,
             epoch: 0,
             groups: Vec::new(),
+            turn_row: 0,
             tools: HashMap::new(),
             tick: slint::Timer::default(),
             server: None,
@@ -541,12 +593,19 @@ impl Chat {
                             .collect()
                     })
                     .unwrap_or_default();
+                let group = self.groups.iter().find(|group| group.row == index);
+                let tasks = group.map(|group| group.tasks.clone()).unwrap_or_default();
+                let took_ms = group
+                    .and_then(|group| group.took)
+                    .map(|took| took.as_millis() as u64);
                 SavedRow {
                     role: row.role.to_string(),
                     text: row.text.to_string(),
                     detail: row.detail.to_string(),
                     state: row.state,
                     steps,
+                    tasks,
+                    took_ms,
                 }
             })
             .collect();
@@ -601,7 +660,9 @@ impl Chat {
                             took: step.took_ms.map(Duration::from_millis),
                         })
                         .collect(),
+                    tasks: row.tasks,
                     began: now,
+                    took: row.took_ms.map(Duration::from_millis),
                     live: false,
                     open: false,
                 });
@@ -765,6 +826,7 @@ impl Chat {
             brand: Default::default(),
             open: false,
             elapsed: Default::default(),
+            tasks: Default::default(),
             // A "choices" row keeps its choices a line each, which is how
             // it is saved too.
             choices: if role == "choices" {
@@ -779,22 +841,61 @@ impl Chat {
     }
 
     /// The block steps go into now: the last one while the agent has not
-    /// spoken since, else a new one.
+    /// spoken since, or this turn's when nothing stands after it, else a
+    /// new one - folded, so a turn reads as its task list and its last
+    /// words, with the steps a click away.
     fn live_group(&mut self) -> usize {
-        if let Some(last) = self.groups.len().checked_sub(1)
-            && self.groups[last].live
-        {
-            return last;
+        if let Some(last) = self.groups.len().checked_sub(1) {
+            let group = &mut self.groups[last];
+            if group.live {
+                return last;
+            }
+            if group.row >= self.turn_row && group.row + 1 == self.rows.row_count() {
+                group.live = true;
+                return last;
+            }
         }
         let row = self.push("steps", "", "", 0);
         self.groups.push(Group {
             row,
             steps: Vec::new(),
+            tasks: Vec::new(),
             began: Instant::now(),
+            took: None,
             live: true,
-            open: true,
+            open: false,
         });
         self.groups.len() - 1
+    }
+
+    /// What the agent said between steps of this turn - "now I'll write
+    /// the script" - taken out of the conversation into the turn's block
+    /// as steps of its own: only its last words stay in view.
+    fn fold_words(&mut self) {
+        let mut words = Vec::new();
+        while let Some(last) = self.rows.row_count().checked_sub(1)
+            && last >= self.turn_row
+            && let Some(row) = self.rows.row_data(last)
+            && row.role == "assistant"
+        {
+            words.push(row.text.to_string());
+            self.rows.remove(last);
+        }
+        if words.is_empty() {
+            return;
+        }
+        let index = self.live_group();
+        for said in words.into_iter().rev() {
+            let (first, rest) = said.split_once('\n').unwrap_or((&said, ""));
+            self.groups[index].steps.push(Step {
+                label: clip(first.trim()),
+                detail: clip(rest.trim()),
+                brand: "claude",
+                state: 1,
+                began: Instant::now(),
+                took: None,
+            });
+        }
     }
 
     /// Folds the live block to its summary: the agent has spoken, or the
@@ -804,6 +905,7 @@ impl Chat {
             let group = &mut self.groups[index];
             group.live = false;
             group.open = false;
+            group.took = Some(group.began.elapsed());
             if fail_running {
                 for step in group.steps.iter_mut().filter(|step| step.state == 0) {
                     step.state = 2;
@@ -826,6 +928,8 @@ impl Chat {
         let failed = group.steps.last().is_some_and(|step| step.state == 2);
         let span = if group.live {
             group.began.elapsed()
+        } else if let Some(took) = group.took {
+            took
         } else {
             group
                 .steps
@@ -838,7 +942,11 @@ impl Chat {
             .filter(|_| group.live)
             .map(|step| group.steps[step].brand)
             .unwrap_or_default();
+        let doing = group.tasks.iter().find(|task| task.state == 1);
         let title = match running {
+            _ if group.live && doing.is_some() => {
+                doing.map(|task| task.text.clone()).unwrap_or_default()
+            }
             Some(step) if group.live => group.steps[step].label.clone(),
             _ if group.live => group
                 .steps
@@ -878,6 +986,16 @@ impl Chat {
             open: group.open,
             elapsed: duration(span).into(),
             choices: Default::default(),
+            tasks: slint::ModelRc::from(Rc::new(VecModel::from(
+                group
+                    .tasks
+                    .iter()
+                    .map(|task| AgentTask {
+                        text: task.text.as_str().into(),
+                        state: task.state,
+                    })
+                    .collect::<Vec<_>>(),
+            ))),
         };
         let at = group.row;
         if at < self.rows.row_count() {
@@ -962,8 +1080,16 @@ impl Chat {
                 }
             }
             Said::Tool { id, name, input } => {
-                let (label, detail) = describe(&name, &input);
+                self.fold_words();
                 let index = self.live_group();
+                if name.rsplit("__").next() == Some("tasks_show") {
+                    if let Some(tasks) = tasks_of(&input) {
+                        self.groups[index].tasks = tasks;
+                    }
+                    self.draw_group(index);
+                    return;
+                }
+                let (label, detail) = describe(&name, &input);
                 let group = &mut self.groups[index];
                 group.steps.push(Step {
                     label,
@@ -1155,6 +1281,7 @@ fn start(studio: &mut Studio, text: &str) -> Result<(), String> {
     command.arg("--allowedTools").args(&allowed);
     brief.push_str("\n\n");
     brief.push_str(&studio.agent.thread_note());
+
     command.arg("--append-system-prompt").arg(brief);
     let (model, effort) = (MODELS[studio.agent.model].0, EFFORTS[studio.agent.effort]);
     if studio.agent.picked {
@@ -1175,6 +1302,9 @@ fn start(studio: &mut Studio, text: &str) -> Result<(), String> {
     let mut child = command
         .spawn()
         .map_err(|error| tf("agent.couldNotStart", &[&error]))?;
+    // The reminder rides with the request rather than the instructions,
+    // where a long session's thousands of tool descriptions drown it.
+    let text = format!("{text}\n\n({TASKS_NOTE})");
     if let Some(mut stdin) = child.stdin.take() {
         stdin
             .write_all(text.as_bytes())
@@ -1186,6 +1316,7 @@ fn start(studio: &mut Studio, text: &str) -> Result<(), String> {
 
     let chat = &mut studio.agent;
     chat.epoch += 1;
+    chat.turn_row = chat.rows.row_count();
     let epoch = chat.epoch;
     chat.turn = Some(Turn {
         child: Arc::clone(&child),
@@ -1960,6 +2091,66 @@ mod tests {
         assert_eq!(seconds(Duration::from_millis(5_120)), "5.1s");
         assert_eq!(duration(Duration::from_secs(11)), "11s");
         assert_eq!(duration(Duration::from_secs(134)), "2m 14s");
+    }
+
+    #[test]
+    fn a_turn_reads_as_its_tasks_and_its_last_words() {
+        let mut chat = Chat::default();
+        chat.push("user", "Make EP3", "", 0);
+        chat.turn_row = chat.rows.row_count();
+        // "I'll look first", then a step: the words go into the block.
+        chat.push("assistant", "I'll look first", "", 0);
+        chat.fold_words();
+        let block = chat.live_group();
+        chat.groups[block].tasks = tasks_of(&serde_json::json!({ "tasks": [
+            { "text": "Script", "state": "doing" },
+            { "text": "", "state": "todo" },
+            { "text": "Pictures", "state": "later" },
+        ] }))
+        .expect("tasks");
+        // More words between steps, two at once, then another step.
+        chat.close_group(false);
+        chat.push("assistant", "Writing now\nthe hook first", "", 0);
+        chat.push("assistant", "and then the rest", "", 0);
+        chat.fold_words();
+        assert_eq!(chat.live_group(), block, "the turn keeps its one block");
+        chat.draw_group(block);
+        assert_eq!(chat.rows.row_count(), 2);
+        let row = chat.rows.row_data(1).expect("block");
+        assert_eq!(row.role, "steps");
+        assert_eq!(row.text, "Script", "a running turn is named by its task");
+        assert_eq!(row.tasks.row_count(), 2, "a task without words is dropped");
+        assert_eq!(row.tasks.row_data(1).map(|task| task.state), Some(0));
+        let labels: Vec<String> = chat.groups[block]
+            .steps
+            .iter()
+            .map(|step| step.label.clone())
+            .collect();
+        assert_eq!(
+            labels,
+            ["I'll look first", "Writing now", "and then the rest"]
+        );
+        assert_eq!(chat.groups[block].steps[1].detail, "the hook first");
+        // The last words stay.
+        chat.close_group(false);
+        chat.push("assistant", "EP3 is ready.", "", 0);
+        assert_eq!(chat.rows.row_count(), 3);
+        // A question is never folded away.
+        chat.push("choices", "Yes\nNo", "", 0);
+        chat.fold_words();
+        assert_eq!(chat.rows.row_count(), 4);
+        // The next turn has a block of its own, and the last one's words
+        // are not taken into it.
+        chat.push("user", "Again", "", 0);
+        chat.turn_row = chat.rows.row_count();
+        chat.fold_words();
+        assert_ne!(chat.live_group(), block);
+        assert_eq!(
+            chat.rows.row_data(2).map(|row| row.text),
+            Some("EP3 is ready.".into())
+        );
+        assert_eq!(tasks_of(&serde_json::json!({ "tasks": [] })), None);
+        assert_eq!(tasks_of(&serde_json::json!({})), None);
     }
 
     #[test]
