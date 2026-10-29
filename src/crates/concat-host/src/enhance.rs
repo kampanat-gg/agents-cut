@@ -166,7 +166,11 @@ pub fn target_for(
     media.hash(&mut hasher);
     meta.len().hash(&mut hasher);
     if let Some((start, duration)) = span {
-        ((start * 1000.0).round() as u64, (duration * 1000.0).round() as u64).hash(&mut hasher);
+        (
+            (start * 1000.0).round() as u64,
+            (duration * 1000.0).round() as u64,
+        )
+            .hash(&mut hasher);
     }
     if let Ok(modified) = meta.modified()
         && let Ok(since) = modified.duration_since(std::time::UNIX_EPOCH)
@@ -570,6 +574,7 @@ pub(crate) fn crop(frame: &concat_core::Frame, width: u32, height: u32) -> conca
 /// where it mattered. Each candidate is warmed on one window and timed on
 /// the next two, in the app as it is, and both times are logged. ONNX
 /// Runtime on the CPU is what is left when no GPU opens.
+#[cfg(feature = "infer")]
 fn fastest(file: &Path) -> Result<Enhancer, String> {
     let gpu = on_gpu(file);
     // The CPU is never a contender: where only it would answer, our
@@ -608,8 +613,16 @@ fn fastest(file: &Path) -> Result<Enhancer, String> {
     }
 }
 
+/// The model on our own shaders, in a build without ONNX Runtime: there
+/// is nothing to race them against, and with no GPU nothing to run on.
+#[cfg(not(feature = "infer"))]
+fn fastest(file: &Path) -> Result<Enhancer, String> {
+    on_gpu(file).ok_or_else(|| "enhance: it needs a GPU, and none opened here".to_owned())
+}
+
 /// Seconds `enhancer` takes over one window once warm: the first run
 /// compiles and is not counted, the better of the next two is.
+#[cfg(feature = "infer")]
 fn window_seconds(enhancer: &Enhancer) -> f64 {
     let side = vision::WINDOW;
     let frame = Frame::black(side - 2 * vision::PAD, side - 2 * vision::PAD);
@@ -662,7 +675,11 @@ fn on_gpu(file: &Path) -> Option<Enhancer> {
         concat_render::upscale::Upscaler::new(&layers, net.scale as u32, vision::WINDOW)?;
     log::info!(
         "enhance: on the GPU{}",
-        if upscaler.half() { ", in half floats" } else { "" }
+        if upscaler.half() {
+            ", in half floats"
+        } else {
+            ""
+        }
     );
     Some(Enhancer::with(Box::new(GpuWindows(upscaler))))
 }
@@ -691,7 +708,9 @@ mod tests {
                 let p = PathBuf::from(std::env::var_os("HOME")?)
                     .join("Library/Application Support")
                     .join(id);
-                p.join("cutout-models/realesr-general-x4v3.onnx").is_file().then_some(p)
+                p.join("cutout-models/realesr-general-x4v3.onnx")
+                    .is_file()
+                    .then_some(p)
             })
             .next()
         else {
@@ -704,9 +723,22 @@ mod tests {
         // Four seconds whose frame number is drawn on it, with a tone.
         let made = std::process::Command::new("ffmpeg")
             .args(["-y", "-v", "error"])
-            .args(["-f", "lavfi", "-i", "testsrc2=size=160x96:rate=10:duration=4"])
+            .args([
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=160x96:rate=10:duration=4",
+            ])
             .args(["-f", "lavfi", "-i", "sine=frequency=440:duration=4"])
-            .args(["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest"])
+            .args([
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+                "-shortest",
+            ])
             .arg(&clip)
             .status();
         if !made.is_ok_and(|status| status.success()) {
@@ -750,7 +782,10 @@ mod tests {
             .map(|(a, b)| f64::from(a.abs_diff(*b)))
             .sum::<f64>()
             / first.pixels().len() as f64;
-        assert!(off < off_wrong, "starts at one second: {off} against {off_wrong}");
+        assert!(
+            off < off_wrong,
+            "starts at one second: {off} against {off_wrong}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -762,7 +797,15 @@ mod tests {
         let _ = std::fs::create_dir_all(&dir);
         let clip = dir.join("clip.mp4");
         let made = std::process::Command::new("ffmpeg")
-            .args(["-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=1920x1080:rate=30:duration=1"])
+            .args([
+                "-y",
+                "-v",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=size=1920x1080:rate=30:duration=1",
+            ])
             .args(["-c:v", "libx264", "-pix_fmt", "yuv420p"])
             .arg(&clip)
             .status();
@@ -772,8 +815,12 @@ mod tests {
         let data = ["org.standalones.concat", "app.concat.editor"]
             .iter()
             .filter_map(|id| {
-                let p = PathBuf::from(std::env::var_os("HOME")?).join("Library/Application Support").join(id);
-                p.join("cutout-models/realesr-general-x4v3.onnx").is_file().then_some(p)
+                let p = PathBuf::from(std::env::var_os("HOME")?)
+                    .join("Library/Application Support")
+                    .join(id);
+                p.join("cutout-models/realesr-general-x4v3.onnx")
+                    .is_file()
+                    .then_some(p)
             })
             .next()
             .expect("the model");
@@ -797,8 +844,10 @@ mod tests {
     /// the CPU elsewhere - give the same picture,
     /// tiles, margins and pasting included: a few levels at the worst pixel
     /// and well under one on average, the
-    /// GPU working in half floats. Needs the fetched model and a GPU.
+    /// GPU working in half floats. Needs the fetched model and a GPU, and
+    /// a build with ONNX Runtime in it.
     #[test]
+    #[cfg(feature = "infer")]
     fn the_gpu_enhances_as_onnx_runtime_does() {
         let Some(file) = ["org.standalones.concat", "app.concat.editor"]
             .iter()
@@ -825,7 +874,12 @@ mod tests {
         let pixels: Vec<u8> = (0..width * height)
             .flat_map(|at| {
                 let (x, y) = (at % width, at / width);
-                [(x * 255 / width) as u8, (y * 2) as u8, ((x ^ y) & 0xff) as u8, 255]
+                [
+                    (x * 255 / width) as u8,
+                    (y * 2) as u8,
+                    ((x ^ y) & 0xff) as u8,
+                    255,
+                ]
             })
             .collect();
         let frame = Frame::from_rgba(width, height, pixels).expect("a frame");
@@ -890,7 +944,10 @@ mod tests {
             target_for(&project, &media, 2, 0.750_001, false, None),
             Some(blended.clone())
         );
-        assert_ne!(target_for(&project, &media, 4, 0.75, false, None), Some(blended));
+        assert_ne!(
+            target_for(&project, &media, 4, 0.75, false, None),
+            Some(blended)
+        );
         // A file with different bytes is a different copy.
         std::fs::write(&media, b"not really, but longer").expect("write");
         assert_ne!(target_for(&project, &media, 2, 1.0, false, None), Some(two));

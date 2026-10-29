@@ -1,0 +1,1396 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jareer Abdullah and Concat contributors
+
+import { Theme } from "theme/theme.slint";
+import { I18n } from "i18n.slint";
+import { Glyph, Icon } from "icons.slint";
+import { IconButton } from "primitives/panel.slint";
+import { Tip } from "primitives/tooltip.slint";
+
+/// One tool call in a block of steps, in words: `state` 0 while it runs, 1
+/// done, 2 failed; `time` once it is over; `last` draws no line under it.
+export struct AgentStep {
+    label: string,
+    detail: string,
+    /// Who does it: "claude", "codex", "elevenlabs", or "" for the
+    /// editor's own work; see `Brand`.
+    brand: string,
+    state: int,
+    time: string,
+    last: bool,
+}
+
+/// One task of the list the agent shows for a turn: `state` 0 to do, 1
+/// under way, 2 done.
+export struct AgentTask {
+    text: string,
+    state: int,
+}
+
+/// A conversation to switch to: the channel's (an empty key), or an
+/// episode's, by its folder.
+export struct AgentThread {
+    key: string,
+    title: string,
+    current: bool,
+}
+
+/// A voice on offer for the channel's narration.
+export struct AgentVoice {
+    name: string,
+    id: string,
+    /// One of the user's own rather than one shared by someone else.
+    mine: bool,
+    /// How it sounds, in a few words.
+    note: string,
+    /// It is the channel's voice now.
+    current: bool,
+}
+
+/// One row of the conversation. `role` is "user", "assistant", "tool",
+/// "error" or "note"; a tool row's `detail` is what it was given, and its
+/// `state` 0 while it runs, 1 once it worked, 2 if it failed.
+export struct AgentRow {
+    role: string,
+    text: string,
+    detail: string,
+    state: int,
+    /// A "steps" row's steps, open or folded, and the time it took (or has
+    /// taken so far): the tool calls between two things the agent said.
+    steps: [AgentStep],
+    open: bool,
+    elapsed: string,
+    /// The brand of the step under way, for the header while it runs.
+    brand: string,
+    /// A "choices" row's answers to the question before it.
+    choices: [string],
+    /// A "steps" row's task list, drawn over its steps.
+    tasks: [AgentTask],
+}
+
+
+/// One of the style's buttons: a prompt sent as it is, or with `fill`
+/// put in the box for the user to finish.
+export struct AgentStarter {
+    label: string,
+    prompt: string,
+    fill: bool,
+}
+
+// The agent beside the editor: what it and the user have said, and the
+// tools it called on the project. The conversation and the process behind
+// it are Rust's (see agent.rs); this draws the rows and reports a send.
+export global Agent {
+    in-out property <[AgentRow]> rows;
+    /// The open project's style's buttons; empty without a style.
+    in-out property <[AgentStarter]> starters;
+    /// A turn is running: the send button is a stop button.
+    in-out property <bool> busy;
+    /// The sidebar is open; closed, it is a strip with a button.
+    in-out property <bool> shown: true;
+
+    callback send(text: string);
+    callback cancel();
+    callback new-chat();
+    callback shown-changed(shown: bool);
+    /// A block of steps' header was pressed: open it, or fold it.
+    callback toggle-steps(row: int);
+
+    /// The model and the effort the next turn runs at, by index into the
+    /// two lists, which Rust fills once.
+    in-out property <[string]> models;
+    in-out property <int> model;
+    in-out property <[string]> efforts;
+    in-out property <int> effort;
+    callback model-picked(index: int);
+    callback effort-picked(index: int);
+    /// The + button: files to attach. What they are called in the message
+    /// comes back as `attached-text`, and `attached-token` moves each time.
+    callback attach();
+    /// Words for the box from elsewhere in the window - a clip named by the
+    /// stage's bar - after what is typed there; they come back as
+    /// `attached-text` the way an attachment's do.
+    callback mention(words: string);
+    /// The conversation on screen, and the ones to switch to.
+    in-out property <string> thread-title;
+    /// The conversation on screen is an episode's, not the channel's.
+    in-out property <bool> in-episode;
+    in-out property <[AgentThread]> threads;
+    callback thread-picked(key: string, title: string);
+    /// The sidebar's width, which its edge drags.
+    in-out property <length> width: 340px;
+    /// Codex is installed and signed in; an ElevenLabs connector is
+    /// connected. The box's status row shows both.
+    in-out property <bool> codex-ready;
+    in-out property <bool> elevenlabs-ready;
+    /// The channel's narration voice: set or not, and what it is called.
+    in-out property <bool> voice-set;
+    in-out property <string> voice-name;
+    /// The voices the agent found, the user's own first.
+    in-out property <[AgentVoice]> voices;
+    /// A voice picked from the list, or an id typed in.
+    callback voice-chosen(id: string, name: string);
+    /// "Find voices": the agent lists them through the user's ElevenLabs.
+    callback voices-asked();
+    in-out property <string> attached-text;
+    in-out property <int> attached-token;
+}
+
+// Claude's mark: a burst of rays in clay, the face of the agent that
+// answers here.
+export component ClaudeMark inherits Image {
+    in property <length> size: 40px;
+
+    width: root.size;
+    height: root.size;
+    source: @image-url("logos/claude-color.svg");
+}
+
+/// The mark of who is doing a step - Claude, Codex, ElevenLabs - drawn
+/// beside it so the user sees which service is at work. One-colour marks
+/// take the text's colour; Claude's and Codex's keep their own.
+component Brand inherits Rectangle {
+    in property <string> brand;
+    in property <length> size: 14px;
+    in property <brush> tint: Theme.fg-muted;
+
+    width: root.brand == "" ? 0px : root.size;
+    height: root.size;
+
+    if root.brand == "claude": Image {
+        width: root.size;
+        height: root.size;
+        source: @image-url("logos/claude-color.svg");
+    }
+    if root.brand == "codex": Image {
+        width: root.size;
+        height: root.size;
+        source: @image-url("logos/codex-color.svg");
+    }
+    if root.brand == "elevenlabs": Image {
+        width: root.size;
+        height: root.size;
+        source: @image-url("logos/elevenlabs.svg");
+        colorize: root.tint;
+    }
+}
+
+// A small round button in the box's bottom row.
+component RoundButton inherits Rectangle {
+    in property <Glyph> glyph;
+    in property <bool> filled;
+    in property <bool> enabled: true;
+    in property <string> label;
+    callback clicked();
+
+    width: 30px;
+    height: 30px;
+    border-radius: 15px;
+    background: root.filled ? (touch.has-hover ? Theme.accent-hover : Theme.accent)
+        : touch.has-hover && root.enabled ? Theme.field-hover : transparent;
+    border-width: root.filled ? 0px : 1px;
+    border-color: Theme.line-strong;
+    opacity: root.enabled ? 1 : 0.45;
+
+    Icon {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        glyph: root.glyph;
+        size: 14px;
+        tint: root.filled ? Theme.on-accent : Theme.fg-muted;
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Four rising bars, so many of them lit: how hard the agent thinks.
+component EffortBars inherits Rectangle {
+    in property <int> lit;
+
+    width: 14px;
+    height: 12px;
+
+    for bar in 4: Rectangle {
+        x: bar * 4px;
+        y: parent.height - self.height;
+        width: 2.5px;
+        height: 3px + bar * 3px;
+        border-radius: 1px;
+        background: bar < root.lit ? Theme.fg : Theme.line-strong;
+    }
+}
+
+// A chip in the box's bottom row that opens a list above it.
+/// The channel's narration voice, in the box's row: a microphone, with a
+/// dot when none is chosen yet, and a list to choose one from - the
+/// user's own voices and shared ones the agent found, or an id pasted in.
+component VoiceChip inherits Rectangle {
+    property <length> row-h: 32px;
+    property <int> shown: Math.min(6, Agent.voices.length);
+    property <length> list-h: Agent.voices.length > 0 ? root.shown * root.row-h + 8px : 0px;
+    property <length> menu-h: 30px + root.list-h + 38px + 44px + 12px;
+
+    width: pill.preferred-width + 14px;
+    height: 22px;
+    border-radius: 11px;
+    background: touch.has-hover ? Theme.sidebar-hover : transparent;
+
+    pill := HorizontalLayout {
+        x: 7px;
+        spacing: 5px;
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                glyph: Glyph.mic;
+                size: 12px;
+                tint: Agent.voice-set ? Theme.fg-muted : Theme.fg;
+            }
+        }
+        Text {
+            text: Agent.voice-set ? Agent.voice-name : I18n.t("agent.chooseVoice");
+            color: Agent.voice-set ? Theme.fg-muted : Theme.fg;
+            font-size: Theme.fs-xs;
+            vertical-alignment: center;
+            overflow: elide;
+            max-width: 96px;
+        }
+        // Not chosen yet: a dot, the way an unread thing is marked.
+        if !Agent.voice-set: VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 6px;
+                height: 6px;
+                border-radius: 3px;
+                background: Theme.accent;
+            }
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { menu.show(); }
+    }
+    Tip {
+        text: Agent.voice-set ? I18n.t("agent.voiceIs") + " " + Agent.voice-name
+            : I18n.t("agent.noVoice");
+        active: touch.has-hover;
+    }
+
+    menu := PopupWindow {
+        x: 0;
+        y: -(root.menu-h + 6px);
+        width: 280px;
+        height: root.menu-h;
+        close-policy: close-on-click-outside;
+
+        Rectangle {
+            background: Theme.raised;
+            border-radius: Theme.r-lg;
+            border-width: 1px;
+            border-color: Theme.line-strong;
+            drop-shadow-blur: 14px;
+            drop-shadow-color: #00000055;
+
+            VerticalLayout {
+                padding: 6px;
+                spacing: 0px;
+
+                Text {
+                    height: 30px;
+                    text: Agent.voice-set ? I18n.t("agent.voiceIs") + " " + Agent.voice-name
+                        : I18n.t("agent.noVoice");
+                    color: Theme.fg;
+                    font-size: Theme.fs;
+                    font-weight: Theme.weight-title;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                if Agent.voices.length > 0: Flickable {
+                    height: root.list-h;
+                    content-height: Agent.voices.length * root.row-h;
+
+                    VerticalLayout {
+                        for voice in Agent.voices: Rectangle {
+                            height: root.row-h;
+                            border-radius: Theme.r;
+                            background: pick.has-hover ? Theme.field : transparent;
+
+                            HorizontalLayout {
+                                padding-left: 8px;
+                                padding-right: 8px;
+                                spacing: 8px;
+
+                                VerticalLayout {
+                                    alignment: center;
+                                    horizontal-stretch: 1;
+                                    Text {
+                                        text: voice.name;
+                                        color: Theme.fg;
+                                        font-size: Theme.fs;
+                                        overflow: elide;
+                                    }
+                                    if voice.note != "": Text {
+                                        text: voice.note;
+                                        color: Theme.fg-dim;
+                                        font-size: Theme.fs-xs;
+                                        overflow: elide;
+                                    }
+                                }
+                                Text {
+                                    text: voice.mine ? I18n.t("agent.voiceMine") : I18n.t("agent.voiceShared");
+                                    color: Theme.fg-dim;
+                                    font-size: Theme.fs-xs;
+                                    vertical-alignment: center;
+                                }
+                                VerticalLayout {
+                                    alignment: center;
+                                    Icon {
+                                        glyph: Glyph.check;
+                                        size: 12px;
+                                        tint: voice.current ? Theme.fg : transparent;
+                                    }
+                                }
+                            }
+
+                            pick := TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    Agent.voice-chosen(voice.id, voice.name);
+                                    menu.close();
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // The list is the agent's to fetch: the app holds no key.
+                Rectangle {
+                    height: 34px;
+                    border-radius: Theme.r;
+                    background: ask.has-hover ? Theme.field : transparent;
+
+                    HorizontalLayout {
+                        padding-left: 8px;
+                        spacing: 8px;
+                        VerticalLayout {
+                            alignment: center;
+                            ClaudeMark { size: 13px; }
+                        }
+                        Text {
+                            text: I18n.t("agent.findVoices");
+                            color: Agent.busy ? Theme.fg-dim : Theme.fg;
+                            font-size: Theme.fs;
+                            vertical-alignment: center;
+                        }
+                    }
+                    ask := TouchArea {
+                        enabled: !Agent.busy;
+                        mouse-cursor: pointer;
+                        clicked => {
+                            Agent.voices-asked();
+                            menu.close();
+                        }
+                    }
+                }
+
+                // Or the id itself, from the voice's page in ElevenLabs.
+                Rectangle {
+                    height: 44px;
+
+                    Rectangle {
+                        x: 0;
+                        y: 6px;
+                        width: parent.width;
+                        height: 32px;
+                        border-radius: Theme.r;
+                        background: Theme.field;
+                        border-width: 1px;
+                        border-color: field.has-focus ? Theme.line-strong : Theme.line;
+
+                        field := TextInput {
+                            x: 10px;
+                            width: parent.width - 20px;
+                            height: parent.height;
+                            vertical-alignment: center;
+                            single-line: true;
+                            color: Theme.fg;
+                            font-size: Theme.fs;
+                            accepted => {
+                                Agent.voice-chosen(self.text, "");
+                                self.text = "";
+                                menu.close();
+                            }
+                        }
+                        if field.text == "": Text {
+                            x: 10px;
+                            height: parent.height;
+                            text: I18n.t("agent.voicePaste");
+                            color: Theme.fg-dim;
+                            font-size: Theme.fs;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// A service the agent reaches, under the box: its mark, its name, and a
+/// dot that is green once it is connected.
+component Service inherits Rectangle {
+    in property <string> brand;
+    in property <string> name;
+    in property <bool> ready;
+    in property <string> help;
+
+    width: row.preferred-width + 14px;
+    height: 22px;
+    border-radius: 11px;
+    background: touch.has-hover ? Theme.sidebar-hover : transparent;
+
+    row := HorizontalLayout {
+        x: 7px;
+        spacing: 6px;
+        // The mark, with the dot on its corner as a presence is shown.
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 14px;
+                height: 14px;
+                Brand {
+                    x: 0;
+                    y: 0;
+                    brand: root.brand;
+                    size: 12px;
+                    tint: Theme.fg-muted;
+                }
+                Rectangle {
+                    x: parent.width - 6px;
+                    y: parent.height - 6px;
+                    width: 7px;
+                    height: 7px;
+                    border-radius: 3.5px;
+                    border-width: 1.5px;
+                    border-color: Theme.sidebar;
+                    background: root.ready ? Theme.green : Theme.fg-dim;
+                }
+            }
+        }
+        Text {
+            text: root.name;
+            color: root.ready ? Theme.fg-muted : Theme.fg-dim;
+            font-size: Theme.fs-xs;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {}
+    Tip {
+        text: root.help;
+        active: touch.has-hover;
+    }
+}
+
+component Chooser inherits Rectangle {
+    in property <[string]> options;
+    in property <int> current;
+    in property <bool> bars;
+    callback picked(index: int);
+
+    property <length> row-h: 28px;
+
+    height: 30px;
+    width: chip.preferred-width + 16px;
+    border-radius: 15px;
+    background: touch.has-hover ? Theme.field-hover : transparent;
+
+    chip := HorizontalLayout {
+        x: 8px;
+        spacing: 6px;
+        alignment: start;
+
+        VerticalLayout {
+            alignment: center;
+            if root.bars: EffortBars {
+                // Default lights two; each level one more, max all four.
+                lit: root.current == 0 ? 2 : Math.min(4, root.current);
+            }
+            if !root.bars: ClaudeMark { size: 13px; }
+        }
+
+        Text {
+            text: root.options.length > 0 ? root.options[root.current] : "";
+            color: Theme.fg-muted;
+            font-size: Theme.fs-sm;
+            vertical-alignment: center;
+        }
+
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                glyph: Glyph.chevron-down;
+                size: 10px;
+                tint: Theme.fg-dim;
+            }
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { menu.show(); }
+    }
+
+    menu := PopupWindow {
+        x: 0;
+        y: -(root.options.length * root.row-h + 12px);
+        width: 150px;
+        height: root.options.length * root.row-h + 8px;
+
+        Rectangle {
+            background: Theme.raised;
+            border-radius: Theme.r;
+            border-width: 1px;
+            border-color: Theme.line-strong;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: #00000055;
+
+            for option[index] in root.options: Rectangle {
+                x: 4px;
+                y: 4px + index * root.row-h;
+                width: parent.width - 8px;
+                height: root.row-h;
+                border-radius: Theme.r-sm;
+                background: pick.has-hover ? Theme.field-hover : transparent;
+
+                Text {
+                    x: 10px;
+                    text: option;
+                    color: index == root.current ? Theme.fg : Theme.fg-muted;
+                    font-size: Theme.fs;
+                    font-weight: index == root.current ? Theme.weight-title : Theme.weight-body;
+                    vertical-alignment: center;
+                }
+
+                if index == root.current: Icon {
+                    x: parent.width - self.width - 8px;
+                    y: (parent.height - self.height) / 2;
+                    glyph: Glyph.check;
+                    size: 12px;
+                    tint: Theme.accent;
+                }
+
+                pick := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.picked(index); }
+                }
+            }
+        }
+    }
+}
+
+// Something going on: a dot that breathes, not a spinner that demands to be
+// watched.
+component Pulse inherits Rectangle {
+    in property <length> size: 8px;
+
+    width: root.size;
+    height: root.size;
+    border-radius: root.size / 2;
+    background: Theme.accent;
+    opacity: 0.35 + 0.65 * Math.abs(Math.sin(animation-tick() / 1s * 160deg));
+}
+
+// The mark beside a step: a pulse while it runs, a tick once done, a cross
+// if it failed.
+component StepMark inherits Rectangle {
+    in property <int> state;
+
+    width: 14px;
+    height: 14px;
+
+    if root.state == 0: Pulse {
+        x: 3px;
+        y: 3px;
+    }
+    if root.state == 1: Icon {
+        x: 0;
+        y: 0;
+        glyph: Glyph.check;
+        size: 13px;
+        tint: Theme.fg-dim;
+    }
+    if root.state == 2: Icon {
+        x: 1px;
+        y: 1px;
+        glyph: Glyph.close;
+        size: 11px;
+        tint: Theme.danger;
+    }
+}
+
+// The mark beside a task: a ring to do, a pulse while it is under way in
+// a turn that runs, a tick once done.
+component TaskMark inherits Rectangle {
+    in property <int> state;
+    in property <bool> live;
+
+    width: 14px;
+    height: 14px;
+
+    if root.state == 1 && root.live: Pulse {
+        x: 3px;
+        y: 3px;
+    }
+    if root.state == 0 || (root.state == 1 && !root.live): Rectangle {
+        x: 1px;
+        y: 1px;
+        width: 12px;
+        height: 12px;
+        border-radius: 6px;
+        border-width: 1.5px;
+        border-color: root.state == 1 ? Theme.fg-muted : Theme.line-strong;
+    }
+    if root.state == 2: Icon {
+        x: 0;
+        y: 0;
+        glyph: Glyph.check;
+        size: 13px;
+        tint: Theme.green;
+    }
+}
+
+// A block of steps: a header that says what is going on now and for how
+// long, and, open, each step under it on a line, with its time. Over it,
+// the turn's task list when the agent showed one, which is what the turn
+// reads as; the header is then the way into the details.
+component Steps inherits Rectangle {
+    in property <AgentRow> data;
+    in property <int> position;
+
+    height: column.preferred-height;
+
+    property <bool> listed: root.data.tasks.length > 0;
+
+    column := VerticalLayout {
+        spacing: 0px;
+
+        // ── the task list ──
+        if root.listed: VerticalLayout {
+            padding-top: 4px;
+            padding-bottom: 6px;
+            spacing: 7px;
+
+            for task in root.data.tasks: HorizontalLayout {
+                spacing: 9px;
+                padding-left: 2px;
+
+                VerticalLayout {
+                    alignment: start;
+                    padding-top: 2px;
+                    TaskMark {
+                        state: task.state;
+                        live: root.data.state == 0;
+                    }
+                }
+
+                Text {
+                    horizontal-stretch: 1;
+                    text: task.text;
+                    color: task.state == 2 ? Theme.fg-muted : Theme.fg;
+                    font-size: Theme.fs;
+                    font-weight: task.state == 1 && root.data.state == 0
+                        ? Theme.weight-title : Theme.weight-body;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        // ── the header ──
+        Rectangle {
+            height: 30px;
+
+            HorizontalLayout {
+                spacing: 8px;
+                padding-left: 2px;
+
+                VerticalLayout {
+                    alignment: center;
+                    StepMark {
+                        state: root.data.state;
+                    }
+                }
+
+                if root.data.state == 0 && root.data.brand != "": VerticalLayout {
+                    alignment: center;
+                    Brand {
+                        brand: root.data.brand;
+                        tint: Theme.fg;
+                    }
+                }
+
+                Text {
+                    horizontal-stretch: 1;
+                    text: root.data.text;
+                    color: root.data.state == 0 && !root.listed ? Theme.fg : Theme.fg-muted;
+                    font-size: root.listed ? Theme.fs-sm : Theme.fs;
+                    font-weight: root.listed ? Theme.weight-body : Theme.weight-title;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                Text {
+                    text: root.data.elapsed;
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-sm;
+                    vertical-alignment: center;
+                }
+
+                VerticalLayout {
+                    alignment: center;
+                    Icon {
+                        glyph: root.data.open ? Glyph.chevron-up : Glyph.chevron-down;
+                        size: 12px;
+                        tint: header.has-hover ? Theme.fg : Theme.fg-dim;
+                    }
+                }
+            }
+
+            header := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { Agent.toggle-steps(root.position); }
+            }
+        }
+
+        // ── the steps ──
+        if root.data.open: VerticalLayout {
+            padding-top: 2px;
+            padding-bottom: 4px;
+
+            for step in root.data.steps: Rectangle {
+                height: line.preferred-height;
+
+                // The thread down from this step to the next.
+                if !step.last: Rectangle {
+                    x: 2px + 7px - 0.5px;
+                    y: 18px;
+                    width: 1px;
+                    height: parent.height - 18px + 2px;
+                    background: Theme.line;
+                }
+
+                line := HorizontalLayout {
+                    spacing: 8px;
+                    padding-left: 2px;
+                    padding-bottom: 8px;
+
+                    VerticalLayout {
+                        alignment: start;
+                        padding-top: 2px;
+                        StepMark {
+                            state: step.state;
+                        }
+                    }
+
+                    if step.brand != "": VerticalLayout {
+                        alignment: start;
+                        padding-top: 1px;
+                        Brand {
+                            brand: step.brand;
+                            tint: step.state == 0 ? Theme.fg : Theme.fg-muted;
+                        }
+                    }
+
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: 2px;
+
+                        Text {
+                            text: step.label;
+                            color: step.state == 0 ? Theme.fg : Theme.fg-muted;
+                            font-size: Theme.fs;
+                            wrap: word-wrap;
+                        }
+
+                        if step.detail != "": Text {
+                            text: step.detail;
+                            color: step.state == 2 ? Theme.danger : Theme.fg-dim;
+                            font-size: Theme.fs-sm;
+                            wrap: word-wrap;
+                            max-height: 34px;
+                            overflow: elide;
+                        }
+                    }
+
+                    Text {
+                        text: step.time;
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-sm;
+                        vertical-alignment: top;
+                    }
+                }
+            }
+        }
+    }
+}
+
+component Bubble inherits Rectangle {
+    in property <AgentRow> data;
+    in property <int> position;
+
+    property <bool> mine: data.role == "user";
+    property <bool> tool: data.role == "tool";
+    property <bool> problem: data.role == "error";
+    property <bool> note: data.role == "note";
+
+    property <bool> steps: data.role == "steps";
+    property <bool> choices: data.role == "choices";
+    /// The question is the last thing said and nothing runs: its answers
+    /// can be picked.
+    property <bool> open-question: root.position == Agent.rows.length - 1 && !Agent.busy;
+
+    /// "Type my own answer": the box, for words of the user's own.
+    callback own-answer();
+
+    height: stack.preferred-height;
+
+    stack := VerticalLayout {
+        // The answers the agent offered, each a button that sends it, and
+        // the box for one of the user's own; spent once answered.
+        if root.choices: VerticalLayout {
+            spacing: 6px;
+            padding-top: 2px;
+            padding-bottom: 4px;
+
+            for choice in root.data.choices: Rectangle {
+                height: label.preferred-height + 16px;
+                background: pick.has-hover && root.open-question ? Theme.sidebar-hover : transparent;
+                border-radius: Theme.r;
+                border-width: 1px;
+                border-color: Theme.line;
+                opacity: root.open-question ? 1 : 0.5;
+
+                label := Text {
+                    x: 12px;
+                    width: parent.width - 24px;
+                    text: choice;
+                    color: Theme.fg;
+                    font-size: Theme.fs;
+                    wrap: word-wrap;
+                    vertical-alignment: center;
+                }
+
+                pick := TouchArea {
+                    enabled: root.open-question;
+                    mouse-cursor: root.open-question ? pointer : default;
+                    clicked => { Agent.send(choice); }
+                }
+            }
+
+            if root.open-question: Rectangle {
+                height: 34px;
+                background: own.has-hover ? Theme.sidebar-hover : transparent;
+                border-radius: Theme.r;
+                border-width: 1px;
+                border-color: Theme.line;
+
+                Text {
+                    x: 12px;
+                    width: parent.width - 24px;
+                    text: I18n.t("agent.typeOwn") + "…";
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs;
+                    vertical-alignment: center;
+                }
+
+                own := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.own-answer(); }
+                }
+            }
+        }
+
+        if root.steps: Steps {
+            width: root.width;
+            data: root.data;
+            position: root.position;
+        }
+
+        if !root.steps && !root.choices: HorizontalLayout {
+            alignment: root.mine ? end : stretch;
+
+            Rectangle {
+                max-width: root.mine ? root.width * 0.85 : root.width;
+                // What you said in a grey pill, as Claude's app has it; what
+                // the agent said on the ground itself.
+                background: root.mine ? Theme.sidebar-hover
+                    : root.tool ? Theme.well
+                    : root.problem ? Theme.danger-wash
+                    : transparent;
+                border-radius: root.mine ? 14px : Theme.r;
+                border-width: root.problem ? 1px : 0px;
+                border-color: Theme.danger-edge;
+
+                VerticalLayout {
+                    padding-left: root.mine || root.tool || root.problem ? 10px : 2px;
+                    padding-right: root.mine || root.tool || root.problem ? 10px : 2px;
+                    padding-top: root.tool ? 6px : 8px;
+                    padding-bottom: root.tool ? 6px : 8px;
+                    spacing: 2px;
+
+                    HorizontalLayout {
+                        spacing: 6px;
+
+                        if root.tool: Rectangle {
+                            width: 7px;
+                            height: 7px;
+                            y: (parent.height - self.height) / 2;
+                            border-radius: 4px;
+                            background: root.data.state == 0 ? Theme.fg-dim
+                                : root.data.state == 1 ? Theme.green
+                                : Theme.danger;
+                        }
+
+                        Text {
+                            text: root.data.text;
+                            wrap: word-wrap;
+                            color: root.note ? Theme.fg-dim
+                                : root.problem ? Theme.danger
+                                : root.tool ? Theme.fg-muted
+                                : Theme.fg;
+                            // One size for both sides of the conversation,
+                            // as Claude's app has it.
+                            font-size: root.tool || root.note ? Theme.fs-sm : Theme.fs-lg;
+                            font-family: root.mine || root.tool || root.note || root.problem
+                                ? Theme.font : Theme.font-reading;
+                            font-weight: root.tool ? Theme.weight-title : Theme.weight-body;
+                            horizontal-alignment: root.note ? center : left;
+                        }
+                    }
+
+                    if root.tool && root.data.detail != "": Text {
+                        text: root.data.detail;
+                        wrap: word-wrap;
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-xs;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// The open sidebar: a header, the conversation, and the box a request is
+// typed into. Return sends; Shift-Return is a new line.
+export component AgentSidebar inherits Rectangle {
+    // Claude's own sidebar tone, as the title bar over it has: one column
+    // down the left, a blue-grey beside the neutral work.
+    background: Theme.sidebar;
+    clip: true;
+
+    /// Keeps the newest row in view while the user has not scrolled away.
+    property <bool> follow: true;
+    property <length> content-h: list.preferred-height;
+
+    changed content-h => {
+        if (root.follow) {
+            flick.content-y = Math.min(0px, flick.height - root.content-h - 16px);
+        }
+    }
+
+    function submit() {
+        if (Agent.busy || draft.text == "") {
+            return;
+        }
+        root.follow = true;
+        Agent.send(draft.text);
+        draft.text = "";
+    }
+
+    // Placed by hand rather than in a column: a layout's maximum height
+    // would cap the row the sidebar shares with the workspace.
+
+    // ── which conversation ──
+    // The channel's, or one episode's: picking an episode's card opens its
+    // own, and this is the way back, or across to another.
+    Rectangle {
+        y: 0;
+        width: root.width;
+        height: 40px;
+
+        Rectangle {
+            x: 8px;
+            y: 6px;
+            width: switch.preferred-width + 20px;
+            height: 28px;
+            border-radius: Theme.r;
+            background: thread-touch.has-hover && !Agent.busy ? Theme.sidebar-hover : transparent;
+
+            switch := HorizontalLayout {
+                x: 10px;
+                spacing: 6px;
+                VerticalLayout {
+                    alignment: center;
+                    Icon {
+                        glyph: Agent.in-episode ? Glyph.film : Glyph.sparkle;
+                        size: 13px;
+                        tint: Theme.fg-muted;
+                    }
+                }
+                Text {
+                    text: Agent.thread-title;
+                    color: Theme.fg;
+                    font-size: Theme.fs;
+                    font-weight: Theme.weight-title;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Icon {
+                        glyph: Glyph.chevron-down;
+                        size: 10px;
+                        weight: 2.4;
+                        tint: Theme.fg-dim;
+                    }
+                }
+            }
+
+            thread-touch := TouchArea {
+                enabled: !Agent.busy;
+                mouse-cursor: pointer;
+                clicked => { threads.show(); }
+            }
+
+            threads := PopupWindow {
+                x: 0;
+                y: parent.height + 4px;
+                width: 260px;
+                height: Math.min(8, Agent.threads.length) * 30px + 10px;
+                close-policy: close-on-click-outside;
+
+                Rectangle {
+                    background: Theme.raised;
+                    border-radius: Theme.r-lg;
+                    border-width: 1px;
+                    border-color: Theme.line-strong;
+
+                    Flickable {
+                        x: 5px;
+                        y: 5px;
+                        width: parent.width - 10px;
+                        height: parent.height - 10px;
+                        content-height: Agent.threads.length * 30px;
+
+                        VerticalLayout {
+                            for thread in Agent.threads: Rectangle {
+                                height: 30px;
+                                border-radius: Theme.r;
+                                background: pick.has-hover ? Theme.field : transparent;
+
+                                HorizontalLayout {
+                                    padding-left: 8px;
+                                    padding-right: 8px;
+                                    spacing: 8px;
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Icon {
+                                            glyph: thread.key == "" ? Glyph.sparkle : Glyph.film;
+                                            size: 12px;
+                                            tint: Theme.fg-muted;
+                                        }
+                                    }
+                                    Text {
+                                        horizontal-stretch: 1;
+                                        text: thread.title;
+                                        color: Theme.fg;
+                                        font-size: Theme.fs;
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                    }
+                                    VerticalLayout {
+                                        alignment: center;
+                                        Icon {
+                                            glyph: Glyph.check;
+                                            size: 12px;
+                                            tint: thread.current ? Theme.fg : transparent;
+                                        }
+                                    }
+                                }
+
+                                pick := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        Agent.thread-picked(thread.key, thread.title);
+                                        threads.close();
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            y: parent.height - 1px;
+            height: 1px;
+            background: Theme.line;
+        }
+    }
+
+    // ── the conversation ──
+    Rectangle {
+        y: 40px;
+        width: root.width;
+        height: root.height - 40px - box.height;
+
+        flick := Flickable {
+            content-height: root.content-h + 16px;
+            content-width: self.width;
+
+            flicked => {
+                root.follow = self.content-y <= self.height - root.content-h - 16px + 24px;
+            }
+
+            list := VerticalLayout {
+                x: 12px;
+                y: 8px;
+                width: flick.width - 24px;
+                height: self.preferred-height;
+                spacing: 8px;
+
+                for row[index] in Agent.rows: Bubble {
+                    data: row;
+                    position: index;
+                    own-answer => {
+                        draft.focus();
+                    }
+                }
+            }
+        }
+
+        // Over the conversation, which is empty while this shows: declared
+        // after it so its buttons are what a press lands on.
+        if Agent.rows.length == 0: VerticalLayout {
+            width: parent.width;
+            height: parent.height;
+            alignment: center;
+            padding: 24px;
+            spacing: 8px;
+
+            HorizontalLayout {
+                alignment: center;
+                padding-bottom: 6px;
+                ClaudeMark { size: 44px; }
+            }
+
+            Text {
+                text: Agent.in-episode ? I18n.t("agent.episodeEmpty") : I18n.t("agent.emptyPrompt");
+                color: Theme.fg-muted;
+                font-size: Theme.fs;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+
+            // The style's buttons: a request without writing one.
+            if Agent.starters.length > 0: Text {
+                text: I18n.t("agent.quickStart");
+                color: Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                horizontal-alignment: center;
+            }
+
+            for starter in Agent.starters: Rectangle {
+                height: 34px;
+                // Flat, edged, lit on hover: the way Claude's sidebar rows
+                // and its cards are drawn, not raised chips.
+                background: chip.has-hover ? Theme.sidebar-hover : transparent;
+                border-radius: Theme.r;
+                border-width: 1px;
+                border-color: Theme.line;
+
+                Text {
+                    x: 12px;
+                    width: parent.width - 24px;
+                    text: starter.label;
+                    color: Theme.fg;
+                    font-size: Theme.fs;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                chip := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        if (starter.fill) {
+                            draft.text = starter.prompt;
+                            draft.focus();
+                            draft.set-selection-offsets(1000000, 1000000);
+                        } else if (!Agent.busy) {
+                            root.follow = true;
+                            Agent.send(starter.prompt);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ── the request box ──
+    // A card: the words on top, growing with them, and a row under them of
+    // what to send with them - files, the model, the effort - and Send.
+    box := Rectangle {
+        property <length> words: Math.min(132px, Math.max(22px, draft.preferred-height));
+
+        y: root.height - self.height;
+        width: root.width;
+        height: self.words + 42px + 38px + 26px;
+
+        Rectangle {
+            x: 10px;
+            y: 6px;
+            width: parent.width - 20px;
+            height: parent.height - 22px - 26px;
+            background: Theme.field;
+            border-radius: 14px;
+            border-width: 1px;
+            border-color: draft.has-focus ? Theme.line-strong : Theme.line;
+            drop-shadow-blur: 10px;
+            drop-shadow-offset-y: 2px;
+            drop-shadow-color: #00000033;
+
+            draft := TextInput {
+                x: 14px;
+                y: 12px;
+                width: parent.width - 28px;
+                height: box.words;
+                color: Theme.fg;
+                font-size: Theme.fs-lg;
+                single-line: false;
+                wrap: word-wrap;
+                selection-background-color: Theme.accent;
+                selection-foreground-color: Theme.on-accent;
+
+                key-pressed(event) => {
+                    if (event.text == Key.Return && !event.modifiers.shift) {
+                        root.submit();
+                        return accept;
+                    }
+                    return reject;
+                }
+            }
+
+            if draft.text == "": Text {
+                x: 14px;
+                y: 12px;
+                text: I18n.t("agent.placeholder");
+                color: Theme.fg-dim;
+                font-size: Theme.fs-lg;
+            }
+
+            // Files attached: their names go into the words being typed.
+            property <int> attached: Agent.attached-token;
+            changed attached => {
+                draft.text = draft.text == "" ? Agent.attached-text
+                    : draft.text + " " + Agent.attached-text;
+                draft.focus();
+                draft.set-selection-offsets(1000000, 1000000);
+            }
+
+            HorizontalLayout {
+                x: 8px;
+                y: parent.height - 38px;
+                width: parent.width - 18px;
+                height: 30px;
+                spacing: 6px;
+
+                RoundButton {
+                    glyph: Glyph.plus;
+                    label: I18n.t("agent.attach");
+                    clicked => { Agent.attach(); }
+                }
+
+                Chooser {
+                    options: Agent.models;
+                    current: Agent.model;
+                    picked(index) => { Agent.model-picked(index); }
+                }
+
+                Chooser {
+                    options: Agent.efforts;
+                    current: Agent.effort;
+                    bars: true;
+                    picked(index) => { Agent.effort-picked(index); }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                RoundButton {
+                    glyph: Agent.busy ? Glyph.stop : Glyph.chevron-up;
+                    label: Agent.busy ? I18n.t("agent.stop") : I18n.t("agent.send");
+                    filled: Agent.busy || draft.text != "";
+                    enabled: Agent.busy || draft.text != "";
+                    clicked => {
+                        if (Agent.busy) {
+                            Agent.cancel();
+                        } else {
+                            root.submit();
+                        }
+                    }
+                }
+            }
+        }
+
+        // What the agent reaches besides the editor: the narration voice,
+        // Codex for pictures and ElevenLabs for sound, each with whether
+        // it is ready.
+        HorizontalLayout {
+            x: 12px;
+            y: parent.height - 30px;
+            height: 22px;
+            spacing: 4px;
+            alignment: start;
+
+            VoiceChip {}
+            Service {
+                brand: "codex";
+                name: "Codex";
+                ready: Agent.codex-ready;
+                help: Agent.codex-ready ? I18n.t("agent.codexReady") : I18n.t("agent.codexMissing");
+            }
+            Service {
+                brand: "elevenlabs";
+                name: "ElevenLabs";
+                ready: Agent.elevenlabs-ready;
+                help: Agent.elevenlabs-ready ? I18n.t("agent.elevenReady") : I18n.t("agent.elevenMissing");
+            }
+        }
+    }
+}
+
+// The closed sidebar: a strip at the edge with the button that opens it.
+export component AgentRail inherits Rectangle {
+    background: Theme.sidebar;
+
+    VerticalLayout {
+        padding-top: 9px;
+        alignment: start;
+
+        HorizontalLayout {
+            alignment: center;
+
+            IconButton {
+                glyph: Glyph.sparkle;
+                label: I18n.t("agent.show");
+                checked: Agent.busy;
+                clicked => { Agent.shown-changed(true); }
+            }
+        }
+    }
+}

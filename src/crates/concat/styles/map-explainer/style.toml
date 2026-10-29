@@ -1,0 +1,28 @@
+# A style: what a new project made with it starts as. The folder's
+# CLAUDE.md is copied into the project, where the agent reads it.
+
+name = "Map explainer"
+name_th = "แผนที่อธิบายเรื่อง"
+description = "Geography, history and current events explained on calm maps with arrows, pins and lower thirds."
+description_th = "อธิบายภูมิศาสตร์ ประวัติศาสตร์ และข่าว บนแผนที่ที่มีลูกศร หมุด และป้ายชื่อ"
+aspect = "9:16"
+
+[[starters]]
+label = "Explain a region or event"
+label_th = "อธิบายพื้นที่หรือเหตุการณ์"
+prompt = "Make a new map episode explaining: "
+prompt_th = "ทำตอนแผนที่ใหม่อธิบายเรื่อง: "
+fill = true
+
+[[starters]]
+label = "A country in 60 seconds"
+label_th = "ประเทศหนึ่งใน 60 วินาที"
+prompt = "Make a 60-second episode about this country: "
+prompt_th = "ทำตอน 60 วินาทีเกี่ยวกับประเทศ: "
+fill = true
+
+[[starters]]
+label = "Write 5 hooks"
+label_th = "คิด hook 5 แบบ"
+prompt = "Write 5 hook options for the episode on the active timeline. Do not edit anything yet."
+prompt_th = "คิด hook 5 แบบสำหรับตอนใน timeline ที่เปิดอยู่ ยังไม่ต้องแก้อะไร"

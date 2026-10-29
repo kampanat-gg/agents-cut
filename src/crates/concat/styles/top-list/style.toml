@@ -1,0 +1,21 @@
+# A style: what a new project made with it starts as. The folder's
+# CLAUDE.md is copied into the project, where the agent reads it.
+
+name = "Top 5 countdown"
+name_th = "จัดอันดับ Top 5"
+description = "Countdowns from 5 to 1 with big rank numbers, one picture and one fact per item."
+description_th = "จัดอันดับจาก 5 ไป 1 ตัวเลขอันดับใหญ่ หนึ่งภาพและหนึ่งข้อเท็จจริงต่ออันดับ"
+aspect = "9:16"
+
+[[starters]]
+label = "New top 5"
+label_th = "Top 5 เรื่องใหม่"
+prompt = "Make a new top 5 episode about: "
+prompt_th = "ทำตอน Top 5 ใหม่เรื่อง: "
+fill = true
+
+[[starters]]
+label = "Check the facts"
+label_th = "ตรวจข้อเท็จจริง"
+prompt = "List each item of the active episode with the fact it states and how sure you are of it."
+prompt_th = "ไล่รายการในตอนที่เปิดอยู่ทีละอันดับ พร้อมข้อเท็จจริงที่บอก และความมั่นใจว่าถูกแค่ไหน"

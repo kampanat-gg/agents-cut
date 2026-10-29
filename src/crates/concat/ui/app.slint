@@ -57,16 +57,17 @@ import { AvatarData } from "primitives/avatar.slint";
 import { VoiceoverData, VoiceoverPanel } from "dialogs/voiceover.slint";
 import { DockDivider, DockSide, SeatBox } from "dock.slint";
 import { Editor } from "editor.slint";
+import { Build } from "build.slint";
 import { PaneKind, Panes } from "workspace/pane-switcher.slint";
 import {
     ChipOption,
+    StyleCard,
     NewProjectDialog,
     RecentProjectData,
     StartData,
     StartScreen,
 } from "start.slint";
 import { TitleBar } from "title-bar.slint";
-import { PhoneEditor, PhoneSheets } from "phone/editor.slint";
 import {
     AppliedEntryData,
     AppliedParamData,
@@ -81,6 +82,8 @@ import { TooltipLayer } from "primitives/tooltip.slint";
 import { FontSearch } from "inspector/font-picker.slint";
 import { Meters } from "timeline/vu-meter.slint";
 import { Workspace } from "workspace/workspace.slint";
+import { Agent, AgentRail, AgentRow, AgentSidebar, AgentStarter, AgentStep, AgentTask, AgentThread, AgentVoice } from "agent.slint";
+import { FileRow, Files, SidePanel, StoryBeat, StoryboardView, VideoCard } from "workspace/files-pane.slint";
 import {
     Backdrop,
     BackdropData,
@@ -111,6 +114,18 @@ import {
 import { SpeedRamp } from "inspector/speed-ramp.slint";
 
 export {
+    Agent,
+    Build,
+    FileRow,
+    Files,
+    StoryBeat,
+    VideoCard,
+    AgentRow,
+    AgentStarter,
+    AgentStep,
+    AgentTask,
+    AgentThread,
+    AgentVoice,
     Curves,
     Fmt,
     Focus,
@@ -167,6 +182,7 @@ export {
     ModelData,
     SettingsData,
     ChipOption,
+    StyleCard,
     RecentProjectData,
     StartData,
     SystemFactData,
@@ -180,6 +196,38 @@ export {
     VoiceCardData,
     NewVoiceData,
 }
+// A column's inner edge, to drag: a resize cursor over a few pixels of the
+// hairline, and the distance moved since the press.
+component EdgeHandle inherits Rectangle {
+    in-out property <length> origin;
+    callback pressed();
+    callback moved(delta: length);
+
+    property <length> start;
+
+    Rectangle {
+        x: (parent.width - 2px) / 2;
+        width: 2px;
+        background: Theme.accent;
+        opacity: touch.has-hover || touch.pressed ? 1 : 0;
+        animate opacity { duration: 100ms; }
+    }
+    touch := TouchArea {
+        mouse-cursor: ew-resize;
+        pointer-event(event) => {
+            if (event.kind == PointerEventKind.down) {
+                root.start = self.absolute-position.x + self.mouse-x;
+                root.pressed();
+            }
+        }
+        moved => {
+            if (self.pressed) {
+                root.moved(self.absolute-position.x + self.mouse-x - root.start);
+            }
+        }
+    }
+}
+
 export component App inherits Window {
     title: "Concat";
     // The taskbar's and Alt-Tab's picture on Windows, and the window
@@ -193,25 +241,19 @@ export component App inherits Window {
     // a hook alone left GNOME drawing its bar above ours:
     // https://github.com/jub0t/Concat/issues/97
     // https://github.com/jub0t/Concat/issues/145
-    // Not for the phone shell on a desk, which draws no buttons of its own
-    // and keeps the platform's bar above the phone's screen; see platform.rs.
-    no-frame: root.own-window-buttons && !root.phone;
+    no-frame: root.own-window-buttons;
     background: Theme.page;
     default-font-family: Theme.font;
     default-font-size: Theme.fs;
     // One line rather than a weight on every Text: everything inherits the
     // compensated body weight, and only titles override it. See theme.slint.
     default-font-weight: Theme.weight-body;
-    // A phone's window is its screen, whatever these say; on a desk asked
-    // for the phone shell (CONCAT_PHONE, see platform.rs) they are a
-    // phone's shape, so the layout is seen as a phone would show it.
-    preferred-width: root.phone ? 420px : 1400px;
-    preferred-height: root.phone ? 880px : 900px;
+    preferred-width: 1400px;
+    preferred-height: 900px;
     // Below this the three columns cannot all hold their minimum and the panes
-    // start eating each other. The phone shell has no columns, and a phone
-    // is narrower than this on every side.
-    min-width: root.phone ? 320px : 900px;
-    min-height: root.phone ? 480px : 560px;
+    // start eating each other.
+    min-width: 900px;
+    min-height: 560px;
     // So the shortcuts work before anything has been clicked. Without it the
     // window opens with nothing focused, and a key would have nowhere to be
     // delivered from until the first press landed somewhere.
@@ -262,6 +304,7 @@ export component App inherits Window {
     callback start-name-edited(name: string);
     callback start-location-edited(path: string);
     callback start-browse();
+    callback start-style-changed(index: int);
     callback start-aspect-changed(index: int);
     callback start-size-changed(index: int);
     callback start-rate-changed(index: int);
@@ -285,8 +328,6 @@ export component App inherits Window {
     in property <int> recents-total;
     /// "0.2.7", for the launch screen's version line.
     in property <string> app-version;
-    /// A file can be dragged in from the system: a desk, not a phone.
-    in property <bool> can-drop;
 
     // Title bar. The drag/maximize pair must be handled in main.rs — a window
     // cannot drag itself from inside the scene graph; the rest are seams like
@@ -294,15 +335,9 @@ export component App inherits Window {
     in property <string> project-name: I18n.t("common.untitledProject");
     in property <string> project-status: I18n.t("common.saved");
     in property <bool> macos;
-    /// The window is a phone's: one screen, held upright, driven by a
-    /// finger. The editor is then the phone shell (ui/phone/) - no title
-    /// strip, no dock - and the launch screen carries its own verbs, as it
-    /// does whenever it is narrow. Set once from Rust; see platform::phone.
-    in property <bool> phone;
-    /// A sheet with pages of its own is the whole window, inside its safe
-    /// area, on a phone and in any window too narrow for it to float as a
-    /// card with room around it.
-    property <bool> sheets-fill: root.phone || root.width < 600px;
+    /// A sheet with pages of its own is the whole window in a window too
+    /// narrow for it to float as a card with room around it.
+    property <bool> sheets-fill: root.width < 600px;
     /// Which floating tool card is in front: "captions" or "speech". The
     /// one opened or grabbed last; Escape closes it first.
     property <string> front-tool: "captions";
@@ -576,25 +611,25 @@ export component App inherits Window {
         // the key, the menu row's label and the dispatch all follow it.
         KeyBinding {
             keys: @keys(F10);
-            enabled: !root.on-start && !root.macos && !root.phone;
+            enabled: !root.on-start && !root.macos;
             activated => { root.open-menu-from-keys(0); }
         }
 
         KeyBinding {
             keys: @keys(Alt + F);
-            enabled: !root.on-start && !root.macos && !root.phone;
+            enabled: !root.on-start && !root.macos;
             activated => { root.open-menu-from-keys(0); }
         }
 
         KeyBinding {
             keys: @keys(Alt + E);
-            enabled: !root.on-start && !root.macos && !root.phone;
+            enabled: !root.on-start && !root.macos;
             activated => { root.open-menu-from-keys(1); }
         }
 
         KeyBinding {
             keys: @keys(Alt + V);
-            enabled: !root.on-start && !root.macos && !root.phone;
+            enabled: !root.on-start && !root.macos;
             activated => { root.open-menu-from-keys(2); }
         }
         // Open and leaving work from the launch screen too: it opens
@@ -633,10 +668,7 @@ export component App inherits Window {
             // Escape closes the sheet on top, as its × does. A sheet busy
             // with a job keeps itself - its × is gone then too - and the
             // key is spent on it, not passed to the editor underneath.
-            // Android's Back is the same key on a phone: unhandled, Slint
-            // finishes the activity, so Back with Export or a sheet open
-            // quit the app, a running export with it.
-            if (event.text == Key.Escape || event.text == Key.Back) {
+            if (event.text == Key.Escape) {
                 if (root.confirm.open) { root.confirm-dismissed(); return accept; }
                 if (root.relink.open) { root.relink-dismiss(); return accept; }
                 if (root.new-voice.open) {
@@ -655,7 +687,7 @@ export component App inherits Window {
                 }
                 // The tool cards, under the sheets: the one in front first.
                 // A floating card closes with its job running, which goes
-                // on and is there again when it is opened; a phone's sheet
+                // on and is there again when it is opened; a filling sheet
                 // busy with a job keeps itself, as its × is gone.
                 if (root.speech.open && (root.front-tool == "speech" || !root.captions.open)) {
                     if (!root.sheets-fill || !root.speech.running) { root.speech-closed(); }
@@ -671,23 +703,6 @@ export component App inherits Window {
                     return accept;
                 }
             }
-            // The phone editor's own sheet - Effects, Text, a clip's tools -
-            // comes down before Back leaves the project.
-            if ((event.text == Key.Back || event.text == Key.Escape) && root.phone && PhoneSheets.open) {
-                PhoneSheets.close-asked += 1;
-                return accept;
-            }
-            // Back with nothing on top: the editor saves and goes back to
-            // the launch screen, as a phone editor's Back returns to its
-            // projects. On the launch screen it goes on up, and Android
-            // leaves the app.
-            if (event.text == Key.Back) {
-                if (!root.on-start) {
-                    root.app-menu-selected("close-project");
-                    return accept;
-                }
-                return reject;
-            }
             if (Editor.key-chord(event.text, event.modifiers.shift, event.modifiers.alt,
                     event.modifiers.control, event.modifiers.meta, root.on-start)) {
                 return accept;
@@ -698,34 +713,30 @@ export component App inherits Window {
         VerticalLayout {
             width: 100%;
             height: 100%;
-            // Inside the system's own bars. A phone or a tablet draws the
-            // window edge to edge, under the status bar and the home
-            // indicator, and the window says how far each reaches in; the
-            // title strip and everything under it start below it, and the
-            // ground shows through behind the bars. Zero on a desktop.
+            // Inside the system's own bars, where the window says it has
+            // any; zero on a desktop.
             padding-top: root.safe-area-insets.top;
             padding-bottom: root.safe-area-insets.bottom;
             padding-left: root.safe-area-insets.left;
             padding-right: root.safe-area-insets.right;
 
-            // No strip on a phone: its menus, its window buttons and its
-            // drag region are all a desk's, and the phone shell's top bar
-            // carries the two verbs that are not.
-            if !root.phone: TitleBar {
+            TitleBar {
                 macos: root.macos;
                 minimal: root.on-start;
                 deep: root.on-start;
                 project-name: root.project-name;
                 status: root.project-status;
+                side: root.on-start ? 0px : Agent.shown ? Agent.width : 44px;
+                panel: root.on-start || !Files.panel-shown ? 0px : Files.panel-width;
 
                 menu: root.open-menu;
                 keyboard-menu: root.keyboard-menu;
                 keyboard-token: root.keyboard-menu-token;
                 menu-opened(index, at-x, keyboard) => {
-                    // Under the strip, which is 32px tall - both measured
-                    // from the window's corner, past the system's bars.
+                    // Under the strip - both measured from the window's
+                    // corner, past the system's bars.
                     appmenu.request-x = at-x + root.safe-area-insets.left;
-                    appmenu.request-y = 32px + root.safe-area-insets.top;
+                    appmenu.request-y = self.height + root.safe-area-insets.top;
                     root.menu-by-keyboard = keyboard;
                     root.menu-opened(index);
                 }
@@ -749,9 +760,7 @@ export component App inherits Window {
                 query: root.start.query;
                 sort: root.start.sort;
                 busy: root.start.busy;
-                phone: root.phone;
                 version: root.app-version;
-                can-drop: root.can-drop;
 
                 compose => { root.start-compose(); }
                 open => { root.start-open(); }
@@ -768,21 +777,85 @@ export component App inherits Window {
             // nothing is passed to it: it is a box with four seats in it, and
             // the views inside those seats reach the state directly. See
             // editor.slint.
-            if !root.on-start && !root.phone: Workspace {
+            //
+            // The agent's sidebar sits at its left, outside the dock: it is
+            // the one panel that is about the whole edit, not a view of it.
+            if !root.on-start: Rectangle {
                 vertical-stretch: 1;
-            }
+                // Placed by hand: in a row layout the sidebar's maximum
+                // height would cap the workspace's. Flush to the window's
+                // edges, a hairline from the work beside it.
+                property <length> side: Agent.shown ? Agent.width : 44px;
 
-            // The phone's editor reads the same global; only the shell round
-            // it differs. Its three verbs that are the window's - export,
-            // settings, closing the project - go where the strip's went.
-            if !root.on-start && root.phone: PhoneEditor {
-                vertical-stretch: 1;
-                project-name: root.project-name;
-                status: root.project-status;
+                if Agent.shown: AgentSidebar {
+                    x: 0;
+                    y: 0;
+                    width: Agent.width;
+                    height: parent.height;
+                }
+                if !Agent.shown: AgentRail {
+                    x: 0;
+                    y: 0;
+                    width: 44px;
+                    height: parent.height;
+                }
+                Rectangle {
+                    x: parent.side;
+                    width: 1px;
+                    background: Theme.gutter;
+                }
 
-                export-clicked => { root.export-clicked(); }
-                open-settings => { root.open-settings(); }
-                close-project => { root.app-menu-selected("close-project"); }
+                // The side panel down the right, as the sidebar is down the
+                // left: the project's videos and files.
+                property <length> panel: Files.panel-shown ? Files.panel-width : 0px;
+                if Files.panel-shown: Rectangle {
+                    x: parent.width - parent.panel - 1px;
+                    width: 1px;
+                    background: Theme.gutter;
+                }
+                if Files.panel-shown: SidePanel {
+                    x: parent.width - parent.panel;
+                    y: 0;
+                    width: parent.panel;
+                    height: parent.height;
+                }
+
+                workspace := Workspace {
+                    x: parent.side + 1px;
+                    y: 0;
+                    width: parent.width - self.x - (Files.panel-shown ? parent.panel + 1px : 0px);
+                    height: parent.height;
+                }
+
+                // The two columns' inner edges drag to resize them, within
+                // what leaves the monitor and the timeline room to work.
+                if Agent.shown: EdgeHandle {
+                    x: parent.side - 3px;
+                    width: 7px;
+                    height: parent.height;
+                    moved(delta) => {
+                        Agent.width = Math.max(260px, Math.min(560px, self.origin + delta));
+                    }
+                    pressed => { self.origin = Agent.width; }
+                }
+                if Files.panel-shown: EdgeHandle {
+                    x: parent.width - parent.panel - 4px;
+                    width: 7px;
+                    height: parent.height;
+                    moved(delta) => {
+                        Files.panel-width = Math.max(240px, Math.min(520px, self.origin - delta));
+                    }
+                    pressed => { self.origin = Files.panel-width; }
+                }
+
+                // An episode's storyboard, over the monitor and the
+                // timeline while it is open.
+                if Files.storyboard >= 0: StoryboardView {
+                    x: workspace.x;
+                    y: 0;
+                    width: workspace.width;
+                    height: parent.height;
+                }
             }
         }
     }
@@ -795,7 +868,6 @@ export component App inherits Window {
         y: 0;
         width: root.width;
         height: root.height;
-        phone: root.phone;
         inset-top: root.safe-area-insets.top;
         inset-bottom: root.safe-area-insets.bottom;
         inset-left: root.safe-area-insets.left;
@@ -822,9 +894,9 @@ export component App inherits Window {
     // desk, like the voiceover panel and under every sheet, so the
     // timeline, the playhead and the selection stay in reach while they
     // are open and a job runs. Whichever was opened or grabbed last is in
-    // front, and is the one Escape closes. On a phone, or a window too
-    // narrow for a card beside the work, they stay the sheets they were,
-    // over everything.
+    // front, and is the one Escape closes. In a window too narrow for a
+    // card beside the work, they stay the sheets they were, over
+    // everything.
     Rectangle {
         x: 0;
         y: 0;
@@ -927,7 +999,6 @@ export component App inherits Window {
         width: root.width;
         height: root.height;
         data: root.start;
-        phone: root.phone;
         aspects: root.start-aspects;
         sizes: root.start-sizes;
         rates: root.start-rates;
@@ -936,6 +1007,7 @@ export component App inherits Window {
         name-edited(name) => { root.start-name-edited(name); }
         location-edited(path) => { root.start-location-edited(path); }
         browse => { root.start-browse(); }
+        style-changed(index) => { root.start-style-changed(index); }
         aspect-changed(index) => { root.start-aspect-changed(index); }
         size-changed(index) => { root.start-size-changed(index); }
         rate-changed(index) => { root.start-rate-changed(index); }
@@ -956,7 +1028,6 @@ export component App inherits Window {
         y: 0;
         width: root.width;
         height: root.height;
-        phone: root.phone;
         data: root.export;
         preview-frame: Editor.preview-frame;
         playhead: Editor.playhead;
@@ -988,7 +1059,6 @@ export component App inherits Window {
         y: 0;
         width: root.width;
         height: root.height;
-        phone: root.phone;
         data: root.settings;
         transcribers: root.transcribers;
         voices: root.voices;

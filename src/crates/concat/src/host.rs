@@ -51,10 +51,11 @@ pub struct Host {
     /// The restoration model, and the enhanced copies it writes.
     pub enhancers: Arc<concat_host::Enhancers>,
     pub reversers: Arc<concat_host::Reversers>,
-    /// The Concat API on a socket, while the Automation page has it on. Its
-    /// own sessions, apart from the window's: a caller edits projects of
-    /// its own, never the one on screen, which `open_projects` keeps it
-    /// from opening; the export slot is shared, so one export at a time
+    /// The Concat API on a socket, while the Automation page has it on. A
+    /// caller's projects are sessions of the server's own, except the one
+    /// on screen: `open_projects` says it is the window's, and its calls
+    /// are run by the window, through its undo history (live mode, see
+    /// `studio::live`). The export slot is shared, so one export at a time
     /// holds across the two.
     pub server: Option<concat_server::Server>,
     /// Which project folders are open, here or over the socket.
@@ -393,31 +394,19 @@ pub fn after_dialog<T: Send + 'static>(
 /// is another screen, which answers later from whichever thread it likes,
 /// so it is asked the same way and answered through [`on_ui`]. `then` is
 /// not called for a picker dismissed with nothing chosen. `filter` names a
-/// family and its extensions, for the desktop's dialog; a phone's offers
-/// every kind of media on its own.
+/// family and its extensions.
 pub fn pick_files_then(
     title: String,
     filter: Option<(String, &'static [&'static str])>,
     then: impl FnOnce(&mut Studio, &App, &Models, Vec<std::path::PathBuf>) + Send + 'static,
 ) {
-    if cfg!(any(target_os = "android", target_os = "ios")) {
-        let _ = slint::invoke_from_event_loop(move || {
+    after_dialog(
+        move || {
             let filter = filter.as_ref().map(|(name, list)| (name.as_str(), *list));
-            crate::platform::pick_files_async(&title, filter, move |paths| {
-                if !paths.is_empty() {
-                    on_ui(move |studio, app, models| then(studio, app, models, paths));
-                }
-            });
-        });
-    } else {
-        after_dialog(
-            move || {
-                let filter = filter.as_ref().map(|(name, list)| (name.as_str(), *list));
-                crate::platform::pick_files(&title, filter)
-            },
-            then,
-        );
-    }
+            crate::platform::pick_files(&title, filter)
+        },
+        then,
+    );
 }
 
 fn on_ui_gated(epoch: Option<u64>, body: impl FnOnce(&mut Studio, &App, &Models) + Send + 'static) {

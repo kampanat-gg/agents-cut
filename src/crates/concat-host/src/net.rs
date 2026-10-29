@@ -17,6 +17,7 @@
 //! than adding to it, and Android gives a process no system store to read,
 //! so that would have failed every download on a phone instead.
 
+use std::path::Path;
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -188,6 +189,56 @@ pub fn get(
         Err(direct) if direct.cause.weight() > proxied.cause.weight() => Err(direct),
         Err(_) => Err(proxied),
     }
+}
+
+/// The most a file fetched for a project may be: a long song, a voice
+/// over a whole episode, a few minutes of footage.
+pub const FETCH_MOST: u64 = 500_000_000;
+
+/// Downloads `url` to `file`, through a partial file beside it that is
+/// renamed into place only once the whole of it is in: http and https
+/// only, and no more than [`FETCH_MOST`]. The bytes written, or why not.
+pub fn download(url: &str, file: &Path) -> Result<u64, String> {
+    use std::io::{Read, Write};
+
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(format!("{url} is not a web address"));
+    }
+    let response = get(
+        url,
+        Duration::from_secs(15),
+        Duration::from_secs(60),
+        Trust::System,
+        &|request| request,
+    )
+    .map_err(|failure| failure.to_string())?;
+    let partial = file.with_extension("part");
+    let mut out = std::fs::File::create(&partial)
+        .map_err(|error| format!("could not write {}: {error}", partial.display()))?;
+    let mut body = response.into_reader().take(FETCH_MOST + 1);
+    let mut buffer = vec![0u8; 64 * 1024];
+    let mut written = 0u64;
+    loop {
+        let read = body.read(&mut buffer).map_err(|error| error.to_string())?;
+        if read == 0 {
+            break;
+        }
+        written += read as u64;
+        if written > FETCH_MOST {
+            drop(out);
+            let _ = std::fs::remove_file(&partial);
+            return Err(format!(
+                "{url} is larger than {} MB",
+                FETCH_MOST / 1_000_000
+            ));
+        }
+        out.write_all(&buffer[..read])
+            .map_err(|error| format!("could not write {}: {error}", partial.display()))?;
+    }
+    drop(out);
+    std::fs::rename(&partial, file)
+        .map_err(|error| format!("could not write {}: {error}", file.display()))?;
+    Ok(written)
 }
 
 /// An agent with these timeouts, through `route` when there is one.

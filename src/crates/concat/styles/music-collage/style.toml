@@ -1,0 +1,27 @@
+# A style: what a new project made with it starts as. The folder's
+# CLAUDE.md is copied into the project, where the agent reads it.
+
+name = "Music: paper-collage stop motion"
+name_th = "เพลง: stop motion กระดาษตัดแปะ"
+description = "A song's short as paper-collage stop motion: your character in poses switched on the beat, props and lyrics cut from paper."
+description_th = "คลิปสั้นของเพลงแบบ stop motion กระดาษตัดแปะ ตัวคุณเปลี่ยนท่าตามบีท ของประกอบและเนื้อเพลงตัดจากกระดาษ"
+aspect = "9:16"
+
+[[starters]]
+label = "Short from a song"
+label_th = "ทำคลิปจากเพลง"
+prompt = "Make a short from the song in assets/ (the lyrics are in its .txt). Use this part of the song: "
+prompt_th = "ทำคลิปสั้นจากเพลงใน assets/ (เนื้อเพลงอยู่ในไฟล์ .txt) ใช้ช่วงนี้ของเพลง: "
+fill = true
+
+[[starters]]
+label = "Make my base pose"
+label_th = "ทำท่าหลักของฉัน"
+prompt = "Make the base pose of the character in characters/ as a paper cut-out for this song's scene, and save it as generated/me_base.png."
+prompt_th = "ทำท่าหลักของตัวละครใน characters/ เป็นกระดาษตัด สำหรับฉากของเพลงนี้ แล้วเซฟเป็น generated/me_base.png"
+
+[[starters]]
+label = "Add the lyrics"
+label_th = "ใส่เนื้อเพลง"
+prompt = "Add the song's lyrics as captions timed to the singing on the active timeline."
+prompt_th = "ใส่เนื้อเพลงเป็นซับให้ตรงกับเสียงร้องใน timeline ที่เปิดอยู่"

@@ -46,6 +46,7 @@ use concat_project::{Command, PlayheadSide};
 
 mod backdrop;
 mod consolidate;
+pub(crate) mod live;
 use consolidate::MergeJob;
 mod masking;
 use masking::{MaskFrame, MaskGrip};
@@ -723,9 +724,7 @@ pub struct Models {
     pub seats: Rc<VecModel<SeatBox>>,
     pub dividers: Rc<VecModel<DockDivider>>,
     pub recents: Rc<VecModel<RecentProjectData>>,
-    /// The Text page's presets, published once from the loaded list.
-    pub text_presets: Rc<VecModel<TextPresetData>>,
-    /// The Latin ones, for the Text page's Styles shelf.
+    /// The Text page's Latin presets, for its Styles shelf.
     pub style_presets: Rc<VecModel<TextPresetData>>,
     /// The rest, by the writing they are for, for its Languages shelf.
     pub language_presets: Rc<VecModel<TextPresetData>>,
@@ -800,7 +799,6 @@ impl Models {
             seats: Rc::new(VecModel::default()),
             dividers: Rc::new(VecModel::default()),
             recents: Rc::new(VecModel::default()),
-            text_presets: Rc::new(VecModel::default()),
             style_presets: Rc::new(VecModel::default()),
             language_presets: Rc::new(VecModel::default()),
             font_families: Rc::new(VecModel::default()),
@@ -836,6 +834,10 @@ const ENHANCE_MARGIN: f64 = 1.0;
 pub struct Studio {
     pub host: Host,
     pub prefs: Preferences,
+    /// The agent's conversation in the sidebar; see `agent.rs`.
+    pub agent: crate::agent::Chat,
+    /// The Files pane's list of the project's folder.
+    pub files: crate::files::Files,
     /// What each effect library is showing, indexed the way `SHELF_KINDS`
     /// is: 0 filters, 1 effects, 2 audio.
     pub library: [LibraryView; 4],
@@ -888,10 +890,6 @@ pub struct Studio {
     pub playhead: f32,
     pub playing: bool,
     transport: slint::Timer,
-    /// The phone's lanes carrying on after a finger throws them, and the
-    /// beat that moves them while they do; see `panes::glide`.
-    coast: crate::panes::glide::Coast,
-    glide_beat: slint::Timer,
     /// The preview axis: the instant under the pointer while it crosses the
     /// lanes, which the monitor shows instead of the playhead's. None when
     /// the pointer is elsewhere, or the axis is off, or the cut is playing.
@@ -921,6 +919,10 @@ pub struct Studio {
     /// and not a clip's: the two share one set of rows and one token.
     pub menu_media: Option<String>,
     pub menu_token: i32,
+    /// The clip the keyboard asked the menu of, and a count that tells the
+    /// lanes to open it; see `Editor.key-menu-token`.
+    key_menu: Option<String>,
+    key_menu_token: i32,
     /// The run of one kind of continuous message being folded into one
     /// line of the activity trail; see `note_activity`.
     activity_burst: Option<crate::panes::Burst>,
@@ -2373,6 +2375,8 @@ impl Studio {
         let text_presets = presets::all(&host.dirs);
         let mut studio = Self {
             prefs,
+            agent: Default::default(),
+            files: Default::default(),
             library: Default::default(),
             session: None,
             echo: None,
@@ -2395,8 +2399,6 @@ impl Studio {
             // ~20px a second: a ten-second cut fits a pane at its default width.
             playing: false,
             transport: slint::Timer::default(),
-            coast: crate::panes::glide::Coast::default(),
-            glide_beat: slint::Timer::default(),
             hover: None,
             hover_hush: slint::Timer::default(),
             clipboard: Vec::new(),
@@ -2411,6 +2413,8 @@ impl Studio {
             menu_target: None,
             menu_media: None,
             menu_token: 0,
+            key_menu: None,
+            key_menu_token: 0,
             activity_burst: None,
             toast: ToastState::default(),
             on_start: true,
@@ -2819,6 +2823,22 @@ impl Studio {
     }
 
     pub fn apply(&mut self, command: Command) -> Option<String> {
+        match self.try_apply(command)? {
+            Ok(view) => view.created_id,
+            Err(error) => {
+                self.notify(&error, true);
+                None
+            }
+        }
+    }
+
+    /// [`Studio::apply`], with the edit layer's no handed back rather than
+    /// said: for a caller that says it itself, as the API does in live
+    /// mode. `None` when no project is open.
+    fn try_apply(
+        &mut self,
+        command: Command,
+    ) -> Option<Result<concat_host::session::EditorView, String>> {
         // An edit ends whatever burst the view was in.
         self.end_burst();
         log::info!("edit: {}", command_name(&command));
@@ -2830,20 +2850,15 @@ impl Studio {
         let session = self.session.as_mut()?;
         let chosen = matches!(command, Command::SetTimelineVideo { .. });
         let before = session.video().color_space;
-        match session.apply(command) {
-            Ok(view) => {
-                let after = session.video().color_space;
-                self.after_change();
-                if !chosen {
-                    self.tell_of_hdr(before, after);
-                }
-                view.created_id
-            }
-            Err(error) => {
-                self.notify(&error, true);
-                None
+        let outcome = session.apply(command);
+        if outcome.is_ok() {
+            let after = session.video().color_space;
+            self.after_change();
+            if !chosen {
+                self.tell_of_hdr(before, after);
             }
         }
+        Some(outcome)
     }
 
     /// [`Studio::apply`] as one move of an inspector gesture: the same
@@ -3149,7 +3164,6 @@ impl Studio {
     // ── playback ──
 
     pub fn play_toggle(&mut self) {
-        self.stop_glide();
         // A voiceover take owns the transport while it runs: Space, the
         // monitor's button and the keymap's play pause or resume the take
         // and the picture together, never the picture alone.
@@ -3282,86 +3296,9 @@ impl Studio {
         self.request_preview();
     }
 
-    // ── the phone's throw ──
-
-    /// A finger landed on the phone's lanes, or two began a pinch: a glide
-    /// still running stops where it is, the way a list does under a
-    /// thumb, and the scrubs from here are the new gesture's samples.
-    pub fn finger_held(&mut self) {
-        self.stop_glide();
-        self.coast.tracker.clear();
-        self.coast.tracking = true;
-    }
-
-    /// A scrub: the playhead goes to `seconds`, and while a finger is on
-    /// the phone's lanes, where it went is a sample of how fast they move.
+    /// A scrub: the playhead goes to `seconds`.
     pub fn scrub(&mut self, seconds: f32) {
         self.seek(seconds.max(0.0));
-        if self.coast.tracking {
-            let at = self.coast.clock();
-            self.coast.tracker.push(at, f64::from(self.playhead));
-        }
-    }
-
-    /// The finger that dragged the phone's lanes along the cut has let go:
-    /// they carry on at its speed and run down, scrubbing as they go.
-    /// Nothing while playing - the transport owns the playhead then - and
-    /// nothing for a finger that stopped before it lifted.
-    pub fn finger_lifted(&mut self) {
-        let tracking = std::mem::replace(&mut self.coast.tracking, false);
-        if !tracking || self.playing || !self.lanes.centred {
-            return;
-        }
-        // Thrown in pixels, so the friction and the thresholds mean the
-        // same at every zoom; each step goes back to seconds at the zoom
-        // of the moment.
-        let per_pixel = f64::from(self.lanes.seconds_per_pixel.max(1e-6));
-        let speed = self.coast.tracker.velocity(self.coast.clock()) / per_pixel;
-        let Some(glide) = crate::panes::glide::Glide::thrown(speed) else {
-            return;
-        };
-        let limit = self.duration().max(self.playhead);
-        self.coast.glide = Some((glide, std::time::Instant::now(), limit));
-        // A beat a frame, only while it moves: nothing is drawn for a glide
-        // that is not running.
-        self.glide_beat.start(
-            slint::TimerMode::Repeated,
-            std::time::Duration::from_millis(16),
-            || {
-                crate::host::Shell::with(|shell, app| {
-                    shell.studio.borrow_mut().glide_step();
-                    shell.studio.borrow_mut().refresh_art();
-                    shell.studio.borrow().publish_lanes(&app, &shell.models);
-                });
-            },
-        );
-    }
-
-    /// One beat of a glide: as far as it has run since the last, never
-    /// before the start of the cut or past `limit`, and the end of it
-    /// when it has slowed to nothing or reached either.
-    fn glide_step(&mut self) {
-        let Some((mut glide, since, limit)) = self.coast.glide else {
-            self.glide_beat.stop();
-            return;
-        };
-        let (moved, going) = glide.step(since.elapsed().as_secs_f64());
-        let per_pixel = f64::from(self.lanes.seconds_per_pixel);
-        let wanted = f64::from(self.playhead) + moved * per_pixel;
-        let limit = f64::from(limit);
-        let reached = wanted <= 0.0 || wanted >= limit;
-        self.seek(wanted.clamp(0.0, limit) as f32);
-        if going && !reached {
-            self.coast.glide = Some((glide, since, limit as f32));
-        } else {
-            self.stop_glide();
-        }
-    }
-
-    /// Ends a glide, if one is running.
-    pub fn stop_glide(&mut self) {
-        self.coast.glide = None;
-        self.glide_beat.stop();
     }
 
     // ── the preview axis ──
@@ -3900,6 +3837,26 @@ impl Studio {
     /// What a library payload names - "media:12", "text:default:Title" -
     /// before the timeline has decided where to put it.
     pub fn incoming(&self, payload: &str) -> Option<DropPlan> {
+        // A file of the project's, from the Files pane: a path, which may
+        // have colons of its own, and not in the bin until it lands.
+        if let Some(path) = payload.strip_prefix("file:") {
+            let kind = crate::files::Kind::of(std::path::Path::new(path));
+            let name = path.rsplit('/').next().unwrap_or(path);
+            let (kind, duration) = match kind {
+                crate::files::Kind::Image => (ClipKind::Image, LAYER_DURATION),
+                crate::files::Kind::Video => (ClipKind::Video, self.files.length(path)? as f32),
+                crate::files::Kind::Audio => (ClipKind::Audio, self.files.length(path)? as f32),
+                _ => return None,
+            };
+            return Some(DropPlan {
+                kind,
+                label: name.to_owned(),
+                media: payload.to_owned(),
+                start: 0.0,
+                duration: duration.max(MIN_DURATION),
+                row: 0,
+            });
+        }
         let mut fields = payload.splitn(3, ':');
         let (sort, id) = (fields.next()?, fields.next()?);
         let label = fields.next().unwrap_or(id);
@@ -4031,6 +3988,10 @@ impl Studio {
             self.place_card(card, Some(track_id), f64::from(plan.start));
             return;
         }
+        if let Some(path) = plan.media.strip_prefix("file:") {
+            self.place_file(path, Some(track_id), f64::from(plan.start));
+            return;
+        }
         let created = if plan.kind == ClipKind::Text {
             self.add_title(
                 Some(track_id),
@@ -4087,6 +4048,10 @@ impl Studio {
         let start = f64::from(self.playhead.max(0.0));
         if let Some(card) = plan.media.strip_prefix("sound:") {
             self.place_card(card, None, start);
+            return;
+        }
+        if let Some(path) = plan.media.strip_prefix("file:") {
+            self.place_file(path, None, start);
             return;
         }
         let created = if plan.kind == ClipKind::Text {
@@ -5169,20 +5134,29 @@ impl Studio {
                 };
                 if edge == Edge::Start {
                     // The head cannot pass the tail, and cannot pull material
-                    // out of a file that has none before the in-point.
+                    // out of a file that has none before the in-point - a
+                    // file's cut only: a still, a title, a shape or a layer
+                    // has no source to run out of, as the command knows too.
                     let wanted = self.snapped(start + seconds, threshold, &id);
                     let limit = start + duration - MIN_DURATION;
-                    let at = wanted.clamp(
-                        (start - source_start / speed.max(0.01))
-                            .max(floor)
-                            .min(limit),
-                        limit,
-                    );
+                    let timed = self.clip(&id).is_some_and(|clip| {
+                        matches!(
+                            clip.kind,
+                            concat_project::model::ClipKind::Video
+                                | concat_project::model::ClipKind::Audio
+                        )
+                    });
+                    let source_floor = if timed {
+                        start - source_start / speed.max(0.01)
+                    } else {
+                        f32::NEG_INFINITY
+                    };
+                    let at = wanted.clamp(source_floor.max(floor).min(limit), limit);
                     let delta = at - start;
                     if let Some(clip) = self.echo_clip_mut(&id) {
                         clip.start = f64::from(at);
                         clip.duration = f64::from(duration - delta);
-                        clip.source_start = f64::from(source_start + delta * speed);
+                        clip.source_start = f64::from((source_start + delta * speed).max(0.0));
                     }
                     // Trim follow: the playhead on the new first frame.
                     if self.prefs.trim_follow {
@@ -6878,7 +6852,14 @@ impl Studio {
     /// Starts the analysis for the first media whose cutout wants masks
     /// that are not there, unless one is running. Called after every
     /// change; the finished job calls it again for whatever is next.
+    ///
+    /// Never in a build without the models: a project cut in one that had
+    /// them keeps the masks it found, and asking for more would only fail
+    /// again after every change.
     pub fn ensure_cutouts(&mut self) {
+        if !cfg!(feature = "vision-ai") {
+            return;
+        }
         if !self.cutout_jobs.is_empty() || self.host.cutouts.is_busy() {
             return;
         }
@@ -7165,9 +7146,6 @@ impl Studio {
         let ask_in = out_dir.clone();
         crate::host::after_dialog(
             move || {
-                if cfg!(any(target_os = "android", target_os = "ios")) {
-                    return Some(ask_in.join(&suggested));
-                }
                 let chosen = crate::platform::save_file(
                     &title,
                     &ask_in,
@@ -8110,9 +8088,6 @@ impl Studio {
         // With the studio unborrowed too; see `host::after_dialog`.
         crate::host::after_dialog(
             move || {
-                if cfg!(any(target_os = "android", target_os = "ios")) {
-                    return Some(out_dir.join(&suggested));
-                }
                 let chosen = crate::platform::save_file(
                     &title,
                     &out_dir,
@@ -8797,6 +8772,14 @@ impl Studio {
                     log::info!("{swept} stale proxies swept from {}", project_dir.display());
                 }
                 self.session = Some(session);
+                // A new project, a new conversation, and its style's
+                // buttons in the sidebar.
+                self.agent.new_chat();
+                let folder =
+                    std::path::PathBuf::from(self.session.as_ref().map_or("", |s| s.path()));
+                self.agent.load_style(&folder);
+                self.files.load(&folder);
+                self.open_video_chat();
                 // The relink dialog belongs to the project that opened it;
                 // this project's own check follows below.
                 self.relink = Default::default();
@@ -9480,6 +9463,9 @@ impl Studio {
         self.publish_lanes(app, models);
         self.publish_chrome(app, models);
         self.publish_dock(app, models);
+        // After the lanes: they list the videos, and with them the
+        // conversations' names, a renamed episode's among them.
+        self.agent.publish(app);
     }
 
     pub fn publish_dock(&self, _app: &App, models: &Models) {
@@ -9489,21 +9475,6 @@ impl Studio {
         // A timeline put back while something plays brings its meters
         // with it; one taken away stops them at their next tick.
         self.wake_meters();
-    }
-
-    /// The window is a phone's: the lanes keep the playhead at their middle
-    /// and glide under it. See `platform::phone` and `TimelinePane::centred`.
-    pub fn set_phone(&mut self, phone: bool) {
-        // A phone's Filters and Transitions sheets open on every shelf at
-        // once, under their All pill; a desk's strip starts on the first.
-        if phone {
-            self.library[0].group = -1;
-            self.library[3].group = -1;
-        }
-        self.lanes.centred = phone;
-        self.meters.phone = phone;
-        let playhead = self.playhead;
-        self.lanes.recentre(playhead);
     }
 
     /// Shows the compact dock, or the wide one, keeping whichever is put
@@ -9519,16 +9490,7 @@ impl Studio {
         let mut out = DockLayout::default();
         let (width, height) = self.workspace;
         if width > SEAT_GAP * 2.0 && height > SEAT_GAP * 2.0 {
-            lay_out(
-                &self.dock,
-                (
-                    SEAT_GAP,
-                    SEAT_GAP,
-                    width - 2.0 * SEAT_GAP,
-                    height - 2.0 * SEAT_GAP,
-                ),
-                &mut out,
-            );
+            lay_out(&self.dock, (0.0, 0.0, width, height), &mut out);
         }
         out
     }
@@ -9567,6 +9529,8 @@ impl Studio {
                 })
                 .collect(),
         );
+
+        self.publish_videos();
 
         let timeline = self.timeline();
         let mut top = 0.0;
@@ -9627,6 +9591,7 @@ impl Studio {
                             .selected_transition()
                             .is_some_and(|picked| picked.id == clip.id),
                         fx: clip.video_effects.iter().any(|effect| effect.enabled),
+                        code: self.code_of(&clip.media_id).is_some(),
                         transition_duration: clip
                             .transition_in
                             .as_ref()
@@ -11354,8 +11319,12 @@ impl Studio {
 
     /// Starts reading the first smart stroke whose region is not there
     /// yet, unless one is being read. Called after every change, and by
-    /// the finished job for whatever is next.
+    /// the finished job for whatever is next. Never in a build without
+    /// the brush model, for the reason [`Self::ensure_cutouts`] gives.
     pub fn ensure_regions(&mut self) {
+        if !cfg!(feature = "vision-ai") {
+            return;
+        }
         if self.region_job.is_some() || self.host.brushes.is_busy() {
             return;
         }
@@ -11622,8 +11591,7 @@ impl Studio {
         );
 
         // The Text page's presets: the look each card draws its name in.
-        // All of them for the phone's one shelf; on the desktop, Styles
-        // has the Latin ones and Languages, under it, the rest.
+        // Styles has the Latin ones and Languages, under it, the rest.
         let cards: Vec<TextPresetData> = self
             .text_presets
             .iter()
@@ -11653,9 +11621,8 @@ impl Studio {
         );
         sync(
             &models.language_presets,
-            cards.iter().filter(|card| !latin(card)).cloned().collect(),
+            cards.into_iter().filter(|card| !latin(card)).collect(),
         );
-        sync(&models.text_presets, cards);
 
         // The bin.
         // The Media shelves count the imports; what the editor made is
@@ -11725,6 +11692,12 @@ impl Studio {
         editor.set_menu_height(Self::menu_height(&rows));
         sync(&models.menu, rows);
         editor.set_menu_token(self.menu_token);
+        if let Some(clip) = self.key_menu.as_deref().and_then(|id| self.clip(id)) {
+            editor.set_key_menu_clip(clip.id.as_str().into());
+            editor.set_key_menu_start(clip.start as f32);
+            editor.set_key_menu_row(self.row_of(&clip.track_id));
+        }
+        editor.set_key_menu_token(self.key_menu_token);
 
         app.set_export(self.export.data(self));
         app.set_settings(self.settings.data(self));
@@ -12027,14 +12000,17 @@ impl Studio {
             // sheet, opened on this clip. Here so the transcriber is found
             // where the sound is, not only on the tray (#302). The captions
             // land on a text lane above, not on this clip's track, so a
-            // locked track does not grey it.
-            rows.push(action(
-                "captions",
-                t("captions.generateCaptions"),
-                Glyph::TextMark,
-                "",
-                self.clip_has_sound(clip),
-            ));
+            // locked track does not grey it. Not in a build with no
+            // transcriber.
+            if cfg!(feature = "speech") {
+                rows.push(action(
+                    "captions",
+                    t("captions.generateCaptions"),
+                    Glyph::TextMark,
+                    "",
+                    self.clip_has_sound(clip),
+                ));
+            }
             rows.push(rule());
         }
         let audible = clip.kind != model::ClipKind::Image;
@@ -12047,6 +12023,16 @@ impl Studio {
         ));
         rows.push(check("lock", &t("studio.lockTrack"), "", locked, true));
         rows.push(rule());
+        if self.code_of(&clip.media_id).is_some() {
+            rows.push(action(
+                "open-code",
+                t("files.openCode"),
+                Glyph::Book,
+                "",
+                true,
+            ));
+            rows.push(rule());
+        }
         rows.push(MenuItemData {
             id: "delete".into(),
             label: t("common.delete").into(),
@@ -12133,8 +12119,29 @@ impl Studio {
             ));
             rows.push(rule());
         }
+        if self.code_of(id).is_some() {
+            rows.push(action("open-code", t("files.openCode"), Glyph::Book, false));
+            rows.push(rule());
+        }
         rows.push(action("remove", t("common.remove"), Glyph::Trash, true));
         rows
+    }
+
+    /// The SVG a code clip is drawn from, when media `id` is one.
+    pub fn code_of(&self, id: &str) -> Option<std::path::PathBuf> {
+        let media = self.project().media_by_id(id)?;
+        let path = std::path::PathBuf::from(&media.path);
+        (media.kind == model::MediaKind::Video && concat_media::svg::is_svg(&path)).then_some(path)
+    }
+
+    /// Opens a code clip's SVG as text.
+    pub fn open_code(&mut self, id: &str) {
+        let Some(path) = self.code_of(id) else {
+            return;
+        };
+        if let Err(error) = platform::open_as_text(&path.to_string_lossy()) {
+            self.notify(&error, true);
+        }
     }
 
     /// A row of a bin card's menu, for the media it was opened on.
@@ -12158,6 +12165,7 @@ impl Studio {
             "range-auto" => {
                 self.apply(range(None));
             }
+            "open-code" => self.open_code(id),
             "range-limited" => {
                 self.apply(range(Some(model::ColorRange::Limited)));
             }
@@ -12217,6 +12225,7 @@ impl Studio {
         let has_selection_media = !self.media.selected.is_empty();
 
         match self.open_menu {
+            // Text to speech has no row in a build without the voices.
             0 => vec![
                 row(
                     "add-selected",
@@ -12317,7 +12326,10 @@ impl Studio {
                     checkable: false,
                     checked: false,
                 },
-            ],
+            ]
+            .into_iter()
+            .filter(|row| cfg!(feature = "speech") || row.id.as_str() != "speech")
+            .collect(),
             1 => vec![
                 row(
                     "undo",
@@ -12635,6 +12647,14 @@ impl Studio {
             "delete-left" => self.delete_to_playhead(PlayheadSide::Left),
             "delete-right" => self.delete_to_playhead(PlayheadSide::Right),
             "select-all" => self.select_all(),
+            // Shift+F10, the keyboard's right-click: the selected clip's
+            // menu, opened at the clip.
+            "clip-menu" => {
+                if let Some(id) = self.selection.first().cloned() {
+                    self.key_menu = Some(id);
+                    self.key_menu_token += 1;
+                }
+            }
             // The phone's way out of the clip tools: nothing selected, the
             // way a press on an empty lane leaves it.
             "deselect" => {
@@ -12751,6 +12771,7 @@ impl Studio {
         };
         match action {
             "copy" => self.copy_clips(Some(id)),
+            "open-code" => self.open_code(&clip.media_id),
             "duplicate" => self.duplicate_selected(),
             // Pasted after the clip that was right-clicked, on its lane.
             "paste" => self.paste_clips(Some(id)),

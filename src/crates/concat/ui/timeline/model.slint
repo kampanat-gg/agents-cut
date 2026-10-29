@@ -105,6 +105,8 @@ export struct ClipData {
     transition-selected: bool,
     /// at least one video effect is live: draws the `fx` chip in the header
     fx: bool,
+    /// A code clip: an SVG drawn from its code. Draws the `</>` chip.
+    code: bool,
     /// Seconds of transition on the cut into this clip; zero for none. The
     /// marker at the clip's head is sized to this, in step with what the
     /// cut actually rides.

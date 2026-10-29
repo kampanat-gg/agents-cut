@@ -322,9 +322,16 @@ pub(super) fn apply(
                         .as_deref()
                         .and_then(crate::speed::curve_of)
                         .map_or(clip.speed, |curve| curve.speed_at(0.0));
-                    let shift = delta
-                        .min(clip.duration - MIN_CLIP_DURATION)
-                        .max(-clip.source_start / lead);
+                    // Only a cut of a file has a source to run out of: a
+                    // still, a title, a shape or a layer is as long as it
+                    // is drawn, and its head extends as freely as its tail.
+                    let timed = matches!(clip.kind, ClipKind::Video | ClipKind::Audio);
+                    let shift = delta.min(clip.duration - MIN_CLIP_DURATION);
+                    let shift = if timed {
+                        shift.max(-clip.source_start / lead)
+                    } else {
+                        shift
+                    };
                     // A magnetic head trim never moves the clip, so the
                     // timeline's own start is no limit to it; a plain one
                     // stops at zero.

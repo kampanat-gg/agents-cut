@@ -61,9 +61,6 @@ pub enum ExportMsg {
     },
     /// The render's worker is done: the file written, or why not.
     Finished(Result<String, String>),
-    /// The phone has moved the file to where it shows it - the path under
-    /// the phone's storage - or could not, and the file is where it was.
-    Published(Result<String, String>),
 }
 
 /// The export sheet's state.
@@ -98,14 +95,7 @@ impl Default for ExportPane {
         Self {
             open: false,
             name: "Untitled".into(),
-            // An iPhone's sandbox has no Movies the app may make, as it has
-            // no Desktop (#299); Documents is the folder Files shows, and a
-            // finished export goes on to Photos from there.
-            folder: home_folder(if cfg!(target_os = "ios") {
-                "Documents/Exports"
-            } else {
-                "Movies"
-            }),
+            folder: home_folder("Movies"),
             resolution: 2,
             rate: 0,
             custom: false,
@@ -209,25 +199,8 @@ impl ExportPane {
             ExportMsg::Finished(Ok(written)) => {
                 self.phase = ExportPhase::Done;
                 self.progress = 1.0;
-                self.written = written.clone();
-                // A phone moves the file to where its gallery shows it, and
-                // the sheet says "finished" once it is there.
-                let handed = platform::publish_export(written.into(), |result| {
-                    on_ui(move |studio, _, _| {
-                        studio.handle(Msg::Export(ExportMsg::Published(result)));
-                    });
-                });
-                if !handed {
-                    studio.notify(&t("export.exportFinished"), false);
-                }
-            }
-            ExportMsg::Published(Ok(path)) => {
-                self.written = path;
+                self.written = written;
                 studio.notify(&t("export.exportFinished"), false);
-            }
-            ExportMsg::Published(Err(error)) => {
-                let folder = platform::published_folder().unwrap_or_default();
-                studio.notify(&tf("export.couldNotPublish", &[&folder, &error]), true);
             }
             ExportMsg::Finished(Err(error)) => {
                 if self.phase == ExportPhase::Idle {
@@ -386,7 +359,9 @@ impl ExportPane {
         } else {
             None
         };
-        if let Some(index) = wanted.and_then(|codec| VideoCodec::ALL.iter().position(|c| *c == codec)) {
+        if let Some(index) =
+            wanted.and_then(|codec| VideoCodec::ALL.iter().position(|c| *c == codec))
+        {
             self.codec = index;
         }
     }
@@ -577,17 +552,12 @@ impl ExportPane {
         ExportData {
             open: self.open,
             name: self.name.as_str().into(),
-            // Where the file ends up: on a phone, the folder its gallery
-            // shows, not the app's own that the export writes into.
             // The name as it will be written: trimmed, as `begin` trims it.
-            path: match platform::published_folder() {
-                Some(folder) => format!("{folder}/{}.{container}", self.name.trim()),
-                None => format!(
-                    "{}/{}.{container}",
-                    self.folder.trim_end_matches('/'),
-                    self.name.trim()
-                ),
-            }
+            path: format!(
+                "{}/{}.{container}",
+                self.folder.trim_end_matches('/'),
+                self.name.trim()
+            )
             .into(),
             format: format!("{width} × {height} · {rate:.2} fps").into(),
             duration: {

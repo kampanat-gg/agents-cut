@@ -227,11 +227,11 @@ mod platform {
     unsafe fn fault_address(info: *mut libc::siginfo_t) -> usize {
         // SAFETY: as `on_signal` says.
         unsafe {
-            #[cfg(any(target_os = "linux", target_os = "android"))]
+            #[cfg(target_os = "linux")]
             {
                 (*info).si_addr() as usize
             }
-            #[cfg(not(any(target_os = "linux", target_os = "android")))]
+            #[cfg(not(target_os = "linux"))]
             {
                 (*info).si_addr as usize
             }
@@ -247,15 +247,9 @@ mod platform {
         // SAFETY: an SA_SIGINFO handler's third argument is a ucontext_t.
         unsafe {
             let context = context as *const libc::ucontext_t;
-            #[cfg(all(
-                any(target_os = "linux", target_os = "android"),
-                target_arch = "x86_64"
-            ))]
+            #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
             return Some((*context).uc_mcontext.gregs[libc::REG_RIP as usize] as usize);
-            #[cfg(all(
-                any(target_os = "linux", target_os = "android"),
-                target_arch = "aarch64"
-            ))]
+            #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
             return Some((*context).uc_mcontext.pc as usize);
             #[cfg(all(target_vendor = "apple", target_arch = "aarch64"))]
             return (*context)
@@ -279,7 +273,7 @@ mod platform {
         // SAFETY: each call writes at most the buffer's length, NUL
         // included.
         let named = unsafe {
-            #[cfg(any(target_os = "linux", target_os = "android"))]
+            #[cfg(target_os = "linux")]
             {
                 libc::prctl(libc::PR_GET_NAME, name.as_mut_ptr()) == 0
             }
@@ -288,7 +282,7 @@ mod platform {
                 libc::pthread_getname_np(libc::pthread_self(), name.as_mut_ptr().cast(), name.len())
                     == 0
             }
-            #[cfg(not(any(target_os = "linux", target_os = "android", target_vendor = "apple")))]
+            #[cfg(not(any(target_os = "linux", target_vendor = "apple")))]
             {
                 false
             }

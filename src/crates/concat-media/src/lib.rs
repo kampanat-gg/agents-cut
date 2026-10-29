@@ -26,6 +26,7 @@ pub mod prefetch;
 pub mod probe;
 pub mod samples;
 pub mod svg;
+pub mod template;
 pub mod treat;
 
 pub use decode::{ColorRange, ColorSignal, DecodeOptions, Decoder, FrameSource, SeekableSource};

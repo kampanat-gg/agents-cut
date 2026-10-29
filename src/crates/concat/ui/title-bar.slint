@@ -4,7 +4,10 @@
 import { I18n } from "i18n.slint";
 import { Theme } from "theme/theme.slint";
 import { Glyph, Icon } from "icons.slint";
-import { AddPaneButton, PaneKind } from "workspace/pane-switcher.slint";
+import { PaneKind } from "workspace/pane-switcher.slint";
+import { Agent } from "agent.slint";
+import { Files } from "workspace/files-pane.slint";
+import { Editor } from "editor.slint";
 
 // The custom title bar.
 //
@@ -51,42 +54,16 @@ component WindowButton inherits Rectangle {
     }
 }
 
-component MenuLabel inherits Rectangle {
-    in property <string> label;
-    /// this label's menu is the one currently open
-    in property <bool> current;
-
-    callback clicked();
-
-    width: text.preferred-width + 16px;
-    border-radius: Theme.r-sm;
-    background: (root.current || touch.has-hover) ? Theme.field : Colors.transparent;
-
-    animate background { duration: 100ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
-
-    text := Text {
-        x: 8px;
-        y: (parent.height - self.height) / 2;
-        text: root.label;
-        color: (root.current || touch.has-hover) ? Theme.fg : Theme.fg-muted;
-        font-size: Theme.fs;
-    }
-
-    touch := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-}
-
 component HeaderIconButton inherits Rectangle {
     in property <Glyph> glyph;
+    in property <bool> enabled: true;
 
     callback clicked();
 
     width: 24px;
     height: 24px;
     border-radius: Theme.r-sm;
-    background: touch.has-hover ? Theme.field : Colors.transparent;
+    background: touch.has-hover && root.enabled ? Theme.field : Colors.transparent;
 
     animate background { duration: 100ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
 
@@ -95,17 +72,61 @@ component HeaderIconButton inherits Rectangle {
         y: (parent.height - self.height) / 2;
         glyph: root.glyph;
         size: 14px;
-        tint: touch.has-hover ? Theme.fg : Theme.fg-muted;
+        tint: !root.enabled ? Theme.fg-dim
+            : touch.has-hover ? Theme.fg : Theme.fg-muted;
     }
 
     touch := TouchArea {
-        mouse-cursor: pointer;
+        mouse-cursor: root.enabled ? pointer : default;
+        enabled: root.enabled;
         clicked => { root.clicked(); }
+    }
+}
+
+// A tab of the side panel, in the strip over it: a word, on a chip when
+// it is the one showing.
+component PanelTab inherits VerticalLayout {
+    in property <string> text;
+    in property <bool> current;
+    callback clicked();
+
+    alignment: center;
+
+    Rectangle {
+        width: word.preferred-width + 20px;
+        height: 26px;
+        border-radius: Theme.r;
+        background: root.current ? Theme.field
+            : touch.has-hover ? Theme.raised : Colors.transparent;
+
+        word := Text {
+            x: 10px;
+            y: (parent.height - self.height) / 2;
+            text: root.text;
+            color: root.current ? Theme.fg : Theme.fg-muted;
+            font-size: Theme.fs;
+        }
+
+        touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.clicked(); }
+        }
     }
 }
 
 export component TitleBar inherits Rectangle {
     in property <string> project-name: I18n.t("common.untitledProject");
+    /// How wide the agent's sidebar is: the strip is that column's colour
+    /// over it and the work's over the rest, with the sidebar's edge
+    /// running up through it, so each column runs to the window's top.
+    in property <length> side: 320px;
+    /// How wide the side panel down the right is, 0 when it is closed: its
+    /// tabs and buttons are the strip over it.
+    in property <length> panel: 300px;
+    /// Where the project's name sits: over the work, the way a
+    /// conversation's title sits over the conversation, and clear of the
+    /// buttons beside the lights when the sidebar is folded to a rail.
+    property <length> title-x: Math.max(root.side + 9px, left.x + left.width + 16px);
     /// "saved", "saving…" — the little truth beside the name. Empty hides it.
     in property <string> status: I18n.t("common.saved");
     /// Leaves room for the traffic lights and drops nothing else; on other
@@ -149,10 +170,28 @@ export component TitleBar inherits Rectangle {
     callback add-pane(kind: PaneKind);
     callback export-clicked();
 
-    height: 32px;
-    // The window's ground, not a panel's: the strip is the frame the panes
-    // float in, and it reads as one with the gutters between them.
-    background: root.deep ? Theme.launch-page : Theme.page;
+    // Tall on macOS, where the lights are moved down into the middle of it
+    // (platform.rs, `place_traffic_lights`); the height a caption has
+    // everywhere else.
+    height: root.macos ? 44px : 36px;
+    background: root.deep ? Theme.launch-page : Theme.sidebar;
+
+    // Each column's colour over it, and their edges running up through.
+    if !root.minimal: Rectangle {
+        x: root.side;
+        width: 1px;
+        background: Theme.gutter;
+    }
+    if !root.minimal: Rectangle {
+        x: root.side + 1px;
+        width: parent.width - self.x;
+        background: Theme.panel;
+    }
+    if !root.minimal && root.panel > 0: Rectangle {
+        x: parent.width - root.panel - 1px;
+        width: 1px;
+        background: Theme.gutter;
+    }
 
     property <bool> drag-armed: false;
     property <length> press-x: 0px;
@@ -188,85 +227,119 @@ export component TitleBar inherits Rectangle {
         }
     }
 
-    HorizontalLayout {
-        x: 0;
+    // ── the sidebar's column: the lights, its switch, the history, and a
+    // new conversation at its far end ──
+    left := HorizontalLayout {
+        x: root.macos ? 84px : 8px;
         y: 0;
-        width: parent.width;
+        width: self.preferred-width;
         height: parent.height;
-        padding-left: root.macos ? 80px : 8px;
+        spacing: 2px;
+        visible: !root.minimal;
+
+        VerticalLayout {
+            alignment: center;
+            HeaderIconButton {
+                glyph: Glyph.panel-left;
+                clicked => { Agent.shown-changed(!Agent.shown); }
+            }
+        }
+        Rectangle { width: 6px; }
+        VerticalLayout {
+            alignment: center;
+            HeaderIconButton {
+                glyph: Glyph.undo;
+                enabled: Editor.can-undo;
+                clicked => { Editor.undo(); }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            HeaderIconButton {
+                glyph: Glyph.redo;
+                enabled: Editor.can-redo;
+                clicked => { Editor.redo(); }
+            }
+        }
+    }
+    if !root.minimal && Agent.shown: VerticalLayout {
+        x: root.side - self.width - 10px;
+        y: 0;
+        width: 26px;
+        height: parent.height;
+        alignment: center;
+        HeaderIconButton {
+            glyph: Glyph.plus;
+            enabled: Agent.rows.length > 0;
+            clicked => { Agent.new-chat(); }
+        }
+    }
+
+    // ── the work's column: the project's name, whose menu holds File, and
+    // from there the arrows to Edit and View; at its far end the window's
+    // own controls and Export ──
+    title := Rectangle {
+        visible: !root.minimal;
+        x: root.title-x;
+        y: (parent.height - self.height) / 2;
+        width: name.preferred-width + 34px;
+        height: 26px;
+        border-radius: Theme.r;
+        background: (root.menu >= 0 || title-touch.has-hover) ? Theme.field : Colors.transparent;
+
+        name := Text {
+            x: 8px;
+            y: (parent.height - self.height) / 2;
+            text: root.project-name;
+            color: Theme.fg;
+            font-size: Theme.fs;
+            font-weight: Theme.weight-title;
+        }
+        Icon {
+            x: parent.width - self.width - 8px;
+            y: (parent.height - self.height) / 2;
+            glyph: Glyph.chevron-down;
+            size: 10px;
+            weight: 2.4;
+            tint: Theme.fg-muted;
+        }
+
+        title-touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => {
+                root.menu-opened(0, title.absolute-position.x - root.absolute-position.x, false);
+            }
+        }
+
+        property <int> asked: root.keyboard-token;
+        changed asked => {
+            if (root.keyboard-menu >= 0) {
+                root.menu-opened(root.keyboard-menu,
+                    title.absolute-position.x - root.absolute-position.x, true);
+            }
+        }
+    }
+    Text {
+        visible: !root.minimal;
+        x: title.x + title.width + 6px;
+        y: (parent.height - self.height) / 2;
+        text: root.status;
+        color: Theme.fg-dim;
+        font-size: Theme.fs-xs;
+    }
+
+    HorizontalLayout {
+        x: parent.width - root.panel - (root.panel > 0 ? 1px : 0px) - self.width;
+        y: 0;
+        width: self.preferred-width;
+        height: parent.height;
         // No right padding when the strip ends in its own buttons: the close
         // button belongs in the corner, not eight pixels shy of it.
-        padding-right: root.own-buttons ? 0px : 8px;
+        padding-right: root.own-buttons && root.panel == 0 ? 0px : 10px;
         spacing: 2px;
 
-        // No mark and no wordmark: the strip opens on the menus. A window
-        // does not need to say whose it is on every frame, and the launch
-        // screen's heading already carries the name where it means something.
-
-        // Each label reports its own position rather than a fixed one: they
-        // are sized from their text, so where "View" starts depends on how
-        // long "File" and "Edit" are.
-        if !root.minimal: file := MenuLabel {
-            label: I18n.t("titleBar.file");
-            current: root.menu == 0;
-            clicked => {
-                root.menu-opened(0, file.absolute-position.x - root.absolute-position.x, false);
-            }
-            property <int> asked: root.keyboard-token;
-            changed asked => {
-                if (root.keyboard-menu == 0) {
-                    root.menu-opened(0, file.absolute-position.x - root.absolute-position.x, true);
-                }
-            }
-        }
-        if !root.minimal: edit := MenuLabel {
-            label: I18n.t("titleBar.edit");
-            current: root.menu == 1;
-            clicked => {
-                root.menu-opened(1, edit.absolute-position.x - root.absolute-position.x, false);
-            }
-            property <int> asked: root.keyboard-token;
-            changed asked => {
-                if (root.keyboard-menu == 1) {
-                    root.menu-opened(1, edit.absolute-position.x - root.absolute-position.x, true);
-                }
-            }
-        }
-        if !root.minimal: view := MenuLabel {
-            label: I18n.t("titleBar.view");
-            current: root.menu == 2;
-            clicked => {
-                root.menu-opened(2, view.absolute-position.x - root.absolute-position.x, false);
-            }
-            property <int> asked: root.keyboard-token;
-            changed asked => {
-                if (root.keyboard-menu == 2) {
-                    root.menu-opened(2, view.absolute-position.x - root.absolute-position.x, true);
-                }
-            }
-        }
-
-        Rectangle { horizontal-stretch: 1; }
-
-        // Beside Settings, because it is the same sort of thing: neither one
-        // is about the project, both are about the window you are looking at
-        // it through. A seat's own corner button changes or closes that seat;
-        // this is the only place a seat can be brought into existence, which
-        // is why it lives on the window and not in a pane.
-        if !root.minimal: VerticalLayout {
-            alignment: center;
-            AddPaneButton {
-                added(kind) => { root.add-pane(kind); }
-            }
-        }
-
-        // The one control that is on both screens, and the theme's sun and
-        // moon gave it the job when they moved into Settings > Appearance.
-        // Nothing behind this gear needs a project — a theme, a transcriber
-        // model, a voice, a version number are all facts about the
-        // application — so the launch screen has no reason to be shut out of
-        // it, and every reason not to be: it is now the only way through to
-        // the theme.
+        // The one control on both screens: nothing behind it needs a
+        // project, and it is the only way through to the theme.
         VerticalLayout {
             alignment: center;
             HeaderIconButton {
@@ -275,33 +348,43 @@ export component TitleBar inherits Rectangle {
             }
         }
 
+        // The side panel, folded away: what brings it back.
+        if !root.minimal && root.panel == 0: VerticalLayout {
+            alignment: center;
+            HeaderIconButton {
+                glyph: Glyph.panel-right;
+                clicked => { Files.panel-shown = true; }
+            }
+        }
+
+        // Plain, as a conversation's Share is: a word and its mark, lit
+        // only under the pointer.
         if !root.minimal: VerticalLayout {
             alignment: center;
             padding-left: 4px;
 
-            export-button := Rectangle {
-                width: label.width + icon.width + 26px;
-                height: 24px;
-                border-radius: Theme.r-sm;
-                background: export-touch.has-hover ? Theme.accent-hover : Theme.accent;
+            Rectangle {
+                width: label.width + icon.width + 22px;
+                height: 26px;
+                border-radius: Theme.r;
+                background: export-touch.has-hover ? Theme.field : Colors.transparent;
 
                 animate background { duration: 100ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
 
                 icon := Icon {
-                    x: 9px;
+                    x: 8px;
                     y: (parent.height - self.height) / 2;
                     glyph: Glyph.export;
-                    size: 12px;
-                    tint: Theme.on-accent;
+                    size: 13px;
+                    tint: Theme.fg;
                 }
 
                 label := Text {
-                    x: icon.x + icon.width + 5px;
+                    x: icon.x + icon.width + 6px;
                     y: (parent.height - self.height) / 2;
                     text: I18n.t("common.export");
-                    color: Theme.on-accent;
+                    color: Theme.fg;
                     font-size: Theme.fs;
-                    font-weight: Theme.weight-title;
                 }
 
                 export-touch := TouchArea {
@@ -311,11 +394,9 @@ export component TitleBar inherits Rectangle {
             }
         }
 
-        // The window's own buttons, last so they sit flush against the right
-        // edge. Full height of the strip, no vertical centring: a caption
-        // button's target is the whole strip height, corner included.
-        if root.own-buttons: Rectangle { width: 6px; }
-        if root.own-buttons: HorizontalLayout {
+        // The window's own buttons, when nothing is to the right of them.
+        if root.own-buttons && root.panel == 0: Rectangle { width: 6px; }
+        if root.own-buttons && root.panel == 0: HorizontalLayout {
             spacing: 0px;
             WindowButton {
                 glyph: Glyph.minus;
@@ -333,32 +414,63 @@ export component TitleBar inherits Rectangle {
         }
     }
 
-    // Centre: the project name, placed against the whole strip rather than
-    // laid out, so it stays centred in the window and not in whatever space
-    // the menus leave over.
-    centre := HorizontalLayout {
-        visible: !root.minimal;
-        x: (parent.width - self.preferred-width) / 2;
+    // ── the side panel's column: its tabs, and its buttons ──
+    if !root.minimal && root.panel > 0: HorizontalLayout {
+        x: parent.width - root.panel;
         y: 0;
-        width: self.preferred-width;
+        width: root.panel;
         height: parent.height;
-        spacing: 6px;
+        padding-left: 10px;
+        padding-right: root.own-buttons ? 0px : 8px;
+        spacing: 2px;
+
+        PanelTab {
+            text: I18n.t("files.videos");
+            current: Files.panel-tab == 0;
+            clicked => { Files.panel-tab = 0; }
+        }
+        PanelTab {
+            text: I18n.t("files.title");
+            current: Files.panel-tab == 1;
+            clicked => { Files.panel-tab = 1; }
+        }
+
+        Rectangle { horizontal-stretch: 1; }
 
         VerticalLayout {
             alignment: center;
-            Text {
-                text: root.project-name;
-                color: Theme.fg-muted;
-                font-size: Theme.fs;
+            if Files.panel-tab == 0: HeaderIconButton {
+                glyph: Glyph.plus;
+                clicked => { Editor.tab-added(); }
+            }
+            if Files.panel-tab == 1: HeaderIconButton {
+                glyph: Glyph.folder;
+                clicked => { Files.open-folder(); }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            HeaderIconButton {
+                glyph: Glyph.close;
+                clicked => { Files.panel-shown = false; }
             }
         }
 
-        VerticalLayout {
-            alignment: center;
-            Text {
-                text: root.status;
-                color: Theme.fg-dim;
-                font-size: Theme.fs-xs;
+        if root.own-buttons: Rectangle { width: 6px; }
+        if root.own-buttons: HorizontalLayout {
+            spacing: 0px;
+            WindowButton {
+                glyph: Glyph.minus;
+                clicked => { root.minimize(); }
+            }
+            WindowButton {
+                glyph: root.maximized ? Glyph.copy : Glyph.maximize;
+                clicked => { root.toggle-maximize(); }
+            }
+            WindowButton {
+                glyph: Glyph.close;
+                danger: true;
+                clicked => { root.close(); }
             }
         }
     }

@@ -25,6 +25,8 @@ pub enum StartMsg {
     Dismiss,
     NameEdited(String),
     LocationEdited(String),
+    /// The style: 0 none, then the built-in styles in their order.
+    StyleChanged(i32),
     /// The frame's shape: 16:9, 9:16, 1:1, 4:3.
     AspectChanged(i32),
     /// The frame's size, as the short edge: 720p, 1080p, 4K.
@@ -125,6 +127,8 @@ pub struct StartPane {
     pub composing: bool,
     pub name: String,
     pub location: String,
+    /// 0 for none, else one past an index into `styles::all()`.
+    pub style: usize,
     /// Index into [`ASPECTS`].
     pub aspect: usize,
     /// Index into [`SIZES`], or one past its end for a custom frame.
@@ -157,6 +161,7 @@ impl Default for StartPane {
             composing: false,
             name: untitled(),
             location: default_location(),
+            style: 0,
             aspect: 0,
             // 1080p, not the first of the three. The size everything else
             // in the app assumes, and the one a phone and a desk agree on.
@@ -175,21 +180,8 @@ impl Default for StartPane {
 }
 
 /// Where a new project goes unless told otherwise; see [`location_on`].
-/// On an iPhone the folder is made here, so that the Files app shows it
-/// from the first launch and not only from the first project.
 fn default_location() -> String {
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    let desktop = dirs::desktop_dir();
-    #[cfg(any(target_os = "android", target_os = "ios"))]
-    let desktop = None;
-    let location = location_on(std::env::consts::OS, desktop, home_folder);
-    if cfg!(target_os = "ios")
-        && !location.is_empty()
-        && let Err(error) = std::fs::create_dir_all(&location)
-    {
-        log::warn!("could not make {location}: {error}");
-    }
-    location
+    location_on(std::env::consts::OS, dirs::desktop_dir(), home_folder)
 }
 
 /// Where a new project goes on `os`: a Concat folder on the desktop. The
@@ -265,6 +257,20 @@ impl StartPane {
             }
             StartMsg::NameEdited(name) => self.name = name,
             StartMsg::LocationEdited(path) => self.location = path,
+            StartMsg::StyleChanged(index) => {
+                let styles = crate::styles::all();
+                self.style = (index.max(0) as usize).min(styles.len());
+                // A style's frame is part of its look: picking one sets
+                // the shape, which stays free to change.
+                if let Some(aspect) = self
+                    .style
+                    .checked_sub(1)
+                    .and_then(|index| styles.get(index))
+                    .and_then(|style| style.settings.aspect_index())
+                {
+                    self.aspect = aspect;
+                }
+            }
             StartMsg::AspectChanged(index) => {
                 self.aspect = (index.max(0) as usize).min(ASPECTS.len() - 1);
             }
@@ -411,8 +417,17 @@ impl StartPane {
             self.error = t("start.chooseWhereProjectFolder");
             return;
         }
+        let style = self
+            .style
+            .checked_sub(1)
+            .and_then(|index| crate::styles::all().into_iter().nth(index));
         let opened = projects::create(&self.location, &name, width, height, num, den, self.canvas)
-            .and_then(|info| studio.open_project(info));
+            .and_then(|info| {
+                if let Some(style) = &style {
+                    crate::styles::apply(style, Path::new(&info.path))?;
+                }
+                studio.open_project(info)
+            });
         self.busy = false;
         match opened {
             Ok(()) => {
@@ -521,11 +536,41 @@ impl StartPane {
             composing: self.composing,
             name: self.name.as_str().into(),
             location: self.location.as_str().into(),
+            style: self.style as i32,
+            style_cards: slint::ModelRc::from(std::rc::Rc::new(slint::VecModel::from(
+                std::iter::once(crate::ui::StyleCard {
+                    label: t("start.noStyle").into(),
+                    preview: slint::Image::default(),
+                    has_preview: false,
+                })
+                .chain(
+                    crate::styles::all()
+                        .iter()
+                        .map(|style| crate::ui::StyleCard {
+                            label: style.settings.name().into(),
+                            preview: style.preview(),
+                            has_preview: true,
+                        }),
+                )
+                .collect::<Vec<_>>(),
+            ))),
+            style_note: self
+                .style
+                .checked_sub(1)
+                .and_then(|index| crate::styles::all().into_iter().nth(index))
+                .map(|style| style.settings.description().to_owned())
+                .unwrap_or_else(|| t("start.noStyleNote"))
+                .into(),
             aspect: self.aspect as i32,
             size: self.size as i32,
             rate: self.rate as i32,
             size_readout: format!("{width} x {height}").into(),
-            canvas: slint::Color::from_argb_u8(self.canvas[3], self.canvas[0], self.canvas[1], self.canvas[2]),
+            canvas: slint::Color::from_argb_u8(
+                self.canvas[3],
+                self.canvas[0],
+                self.canvas[1],
+                self.canvas[2],
+            ),
             custom_width: width as f32,
             custom_height: height as f32,
             custom_fps: fps_of(num, den) as f32,

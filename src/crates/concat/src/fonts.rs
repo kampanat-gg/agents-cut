@@ -10,31 +10,28 @@
 //! once, at start, before any window exists, rather than embedded a second
 //! time.
 //!
-//! None of them has a Chinese, Korean, Arabic, Hebrew, Devanagari, Bengali
-//! or Thai glyph, and Hanken Grotesk, the interface's face, has no
-//! Cyrillic, so a word in those scripts is whatever the machine's own
-//! fonts make of it. A desk has them; a phone from some makers does not,
-//! or keeps them where the collection does not look, and a minimal Linux
-//! install may have none: the interface in Chinese came up as rows of
-//! boxes (#277). So a face for each rides along as the fallback for its
-//! scripts, after whatever the machine has - Noto, cut to what the
-//! interface needs - and Inter, which the title painter carries anyway,
-//! stands behind the machine's own for Cyrillic and Greek.
+//! None of them has a Thai glyph, and Hanken Grotesk, the interface's face,
+//! has no Cyrillic, so a word in those scripts is whatever the machine's
+//! own fonts make of it. So Noto Sans Thai rides along as the fallback for
+//! Thai, after whatever the machine has, and Inter, which the title painter
+//! carries anyway, stands behind the machine's own for Cyrillic and Greek.
+//! macOS lends every other script from its own fonts.
 //!
-//! The Noto faces live in concat-text, which falls back on them for titles
-//! too; their sources, the way they were cut and their licences are on
-//! `concat_text::SCRIPT_FALLBACKS`, and THIRD_PARTY_NOTICES.md lists them.
+//! The Noto face lives in concat-text, which falls back on it for titles
+//! too; its source, the way it was cut and its licence are on
+//! `concat_text::SCRIPT_FALLBACKS`, and THIRD_PARTY_NOTICES.md lists it.
 
 use std::sync::Arc;
 
 use slint::fontique_011::fontique::{self, FallbackKey, FamilyId, Language, Script};
 
-const CJK_FALLBACK: &[u8] = concat_text::NOTO_SANS_CJK_SC;
-const ARABIC_FALLBACK: &[u8] = concat_text::NOTO_SANS_ARABIC_UI;
-const HEBREW_FALLBACK: &[u8] = concat_text::NOTO_SANS_HEBREW;
-const DEVANAGARI_FALLBACK: &[u8] = concat_text::NOTO_SANS_DEVANAGARI;
-const BENGALI_FALLBACK: &[u8] = concat_text::NOTO_SANS_BENGALI;
 const THAI_FALLBACK: &[u8] = concat_text::NOTO_SANS_THAI;
+
+/// Inter's Medium, for the window alone: the weight Claude's app sets its
+/// titles and buttons in. The video's titles have no use for it, so it is
+/// not one of concat-text's base fonts. From the same Inter 4.1 release
+/// as those, under the same licence.
+const INTER_MEDIUM: &[u8] = include_bytes!("../../concat-text/fonts/Inter-Medium.ttf");
 
 /// A face the window falls back on, and the fallback lists it goes on: a
 /// script, and the locales fontique keeps a list of its own for under it
@@ -45,51 +42,12 @@ struct Fallback {
     scripts: &'static [(&'static str, &'static [&'static str])],
 }
 
-/// Every bundled fallback face. Han goes under every locale fontique keeps
-/// a list of its own for - Simplified Chinese is the default, and Taiwan,
-/// Hong Kong, Macau and Singapore, Japanese and Korean each have one - and
-/// Arabic under Persian's and Urdu's as well as its default, Arabic's.
-const FALLBACKS: [Fallback; 6] = [
-    Fallback {
-        face: CJK_FALLBACK,
-        family: "Noto Sans CJK SC",
-        scripts: &[
-            (
-                "Hani",
-                &["", "zh-TW", "zh-HK", "zh-MO", "zh-SG", "ja", "ko"],
-            ),
-            ("Hang", &[""]),
-            ("Hira", &[""]),
-            ("Kana", &[""]),
-            ("Bopo", &[""]),
-        ],
-    },
-    Fallback {
-        face: ARABIC_FALLBACK,
-        family: "Noto Sans Arabic UI",
-        scripts: &[("Arab", &["", "fa", "ur"])],
-    },
-    Fallback {
-        face: HEBREW_FALLBACK,
-        family: "Noto Sans Hebrew",
-        scripts: &[("Hebr", &[""])],
-    },
-    Fallback {
-        face: DEVANAGARI_FALLBACK,
-        family: "Noto Sans Devanagari",
-        scripts: &[("Deva", &[""])],
-    },
-    Fallback {
-        face: BENGALI_FALLBACK,
-        family: "Noto Sans Bengali",
-        scripts: &[("Beng", &[""])],
-    },
-    Fallback {
-        face: THAI_FALLBACK,
-        family: "Noto Sans Thai",
-        scripts: &[("Thai", &[""])],
-    },
-];
+/// Every bundled fallback face.
+const FALLBACKS: [Fallback; 1] = [Fallback {
+    face: THAI_FALLBACK,
+    family: "Noto Sans Thai",
+    scripts: &[("Thai", &[""])],
+}];
 
 /// The scripts Inter stands behind the machine's fonts for: Hanken
 /// Grotesk has Latin and nothing else.
@@ -102,6 +60,48 @@ pub fn register() {
     register_base(&mut collection);
     let registered = register_fallbacks(&mut collection);
     log::debug!("fonts: {} fallback families registered", registered.len());
+    put_system_thai_first(&mut collection);
+}
+
+/// Where a Mac keeps the face its own interface sets Thai in - what Thai
+/// reads as beside San Francisco in every app of the system's, and in
+/// Claude's. Hidden behind a leading dot, so a font list does not offer
+/// it and the renderer does not find it by asking the system for Thai.
+#[cfg(target_os = "macos")]
+const SYSTEM_THAI: (&str, &str) = ("/System/Library/Fonts/ThonburiUI.ttc", ".ThonburiUI");
+
+/// Reads the system's interface face for Thai off the disk and puts it at
+/// the head of Thai's fallback lists, ahead of the machine's other Thai
+/// faces and the bundled Noto, so Thai in the window looks as it does in
+/// the system's own apps. Nothing is bundled for it: a Mac without the
+/// file keeps the order it had.
+fn put_system_thai_first(collection: &mut fontique::Collection) {
+    #[cfg(target_os = "macos")]
+    {
+        let (path, family) = SYSTEM_THAI;
+        let Ok(bytes) = std::fs::read(path) else {
+            return;
+        };
+        let registered = collection.register_fonts(fontique::Blob::new(Arc::new(bytes)), None);
+        let Some(thai) = registered
+            .iter()
+            .map(|(id, _)| *id)
+            .find(|id| collection.family_name(*id) == Some(family))
+        else {
+            return;
+        };
+        let script: Script = "Thai".parse().expect("a script");
+        for language in [None, Language::parse("th").ok()] {
+            let key = FallbackKey::new(script, language.as_ref());
+            let rest: Vec<FamilyId> = collection
+                .fallback_families(key)
+                .filter(|id| *id != thai)
+                .collect();
+            collection.set_fallbacks(key, std::iter::once(thai).chain(rest));
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = collection;
 }
 
 /// Registers the base fonts with `collection`, and puts Inter on the
@@ -111,7 +111,7 @@ fn register_base(
     collection: &mut fontique::Collection,
 ) -> Vec<(FamilyId, Vec<fontique::FontInfo>)> {
     let mut registered = Vec::new();
-    for face in concat_text::BASE_FONTS {
+    for face in concat_text::BASE_FONTS.into_iter().chain([INTER_MEDIUM]) {
         let blob = fontique::Blob::new(Arc::new(face));
         registered.extend(collection.register_fonts(blob, None));
     }
@@ -207,29 +207,18 @@ mod tests {
                 assert_eq!(listed, vec![*family], "{} on {key:?}", fallback.family);
             }
         }
-        // The lists a Chinese, Korean, Persian or Urdu word is looked up
-        // by, named the way the shaper names them.
-        for (script, locale, family) in [
-            ("Hani", None, "Noto Sans CJK SC"),
-            ("Hani", Some("zh-TW"), "Noto Sans CJK SC"),
-            ("Hani", Some("ko"), "Noto Sans CJK SC"),
-            ("Hang", None, "Noto Sans CJK SC"),
-            ("Arab", None, "Noto Sans Arabic UI"),
-            ("Arab", Some("ar"), "Noto Sans Arabic UI"),
-            ("Arab", Some("fa"), "Noto Sans Arabic UI"),
-            ("Arab", Some("ur"), "Noto Sans Arabic UI"),
-            ("Hebr", Some("he"), "Noto Sans Hebrew"),
-            ("Deva", Some("hi"), "Noto Sans Devanagari"),
-            ("Beng", Some("bn"), "Noto Sans Bengali"),
-            ("Thai", Some("th"), "Noto Sans Thai"),
-        ] {
-            let script: Script = script.parse().expect("a script");
-            let language = locale.and_then(|locale| Language::parse(locale).ok());
-            let key = FallbackKey::new(script, language.as_ref());
-            let listed: Vec<FamilyId> = collection.fallback_families(key).collect();
-            assert_eq!(listed.len(), 1, "{key:?}");
-            assert_eq!(collection.family_name(listed[0]), Some(family), "{key:?}");
-        }
+        // The list a Thai word is looked up by, named the way the shaper
+        // names it.
+        let script: Script = "Thai".parse().expect("a script");
+        let language = Language::parse("th").ok();
+        let key = FallbackKey::new(script, language.as_ref());
+        let listed: Vec<FamilyId> = collection.fallback_families(key).collect();
+        assert_eq!(listed.len(), 1, "{key:?}");
+        assert_eq!(
+            collection.family_name(listed[0]),
+            Some("Noto Sans Thai"),
+            "{key:?}"
+        );
     }
 
     /// Inter stands behind the machine's fonts for Cyrillic and Greek,

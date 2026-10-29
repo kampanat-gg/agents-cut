@@ -51,7 +51,7 @@ import { SegmentedControl } from "primitives/segmented-control.slint";
 // - wide, a desk's window from 680px up: one centred column, the create
 //   row across it, the projects as a grid, and the learn cards as a panel
 //   beside the projects once the column is 1100px wide, under them before;
-// - narrow, a phone held upright: stacked the way a phone's own apps are -
+// - narrow, a window under 680px: stacked the way a phone's own apps are -
 //   New project across the width, the projects as a list of rows with the
 //   forget cross on every one, since there is no hover to reveal it with,
 //   and the learn cards as one grouped list at the foot. The sheet's labels
@@ -76,6 +76,14 @@ export struct ChipOption {
     label: string,
     /// Width over height: 1.78 for 16:9, 0.5625 upright, 0 for no box.
     ratio: float,
+}
+
+/// One style on the New Project sheet: its name and a picture of what it
+/// makes, which "None" has not.
+export struct StyleCard {
+    label: string,
+    preview: image,
+    has-preview: bool,
 }
 
 /// One card in the projects grid.
@@ -116,6 +124,13 @@ export struct StartData {
     composing: bool,
     name: string,
     location: string,
+    /// The style a new project starts as: 0 none, then the built-in ones,
+    /// whose names, in the interface's language, and pictures are
+    /// `style-cards`.
+    style: int,
+    style-cards: [StyleCard],
+    /// What the chosen style makes, in a sentence.
+    style-note: string,
     /// Index into `aspects`; the ratio behind it is Rust's.
     aspect: int,
     /// Index into `sizes`.
@@ -156,6 +171,90 @@ export struct StartData {
 }
 
 // ── the small parts ──────────────────────────────────────────────────────
+
+// The styles as a grid of cards, each a picture of what it makes over its
+// name, the picked one outlined: more of them than a row of chips holds, and
+// a look is quicker seen than read.
+component StyleGrid inherits Rectangle {
+    in property <[StyleCard]> cards;
+    in property <int> current;
+    in property <bool> enabled: true;
+    in property <int> columns: 4;
+
+    callback changed(index: int);
+
+    property <length> gap: 8px;
+    property <length> card-w: (root.width - (root.columns - 1) * root.gap) / root.columns;
+    property <length> picture-h: 64px;
+    property <length> card-h: root.picture-h + 36px;
+
+    height: Math.ceil(root.cards.length / root.columns) * (root.card-h + root.gap) - root.gap;
+
+    for card[index] in root.cards: Rectangle {
+        x: Math.mod(index, root.columns) * (root.card-w + root.gap);
+        y: Math.floor(index / root.columns) * (root.card-h + root.gap);
+        width: root.card-w;
+        height: root.card-h;
+        border-radius: Theme.r;
+        background: index == root.current ? Theme.accent-soft
+            : touch.has-hover && root.enabled ? Theme.launch-field-active
+            : Theme.launch-field;
+        clip: true;
+
+        if card.has-preview: Image {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: root.picture-h;
+            source: card.preview;
+            image-fit: cover;
+        }
+
+        // None: the frame, empty.
+        if !card.has-preview: Rectangle {
+            x: 0;
+            y: 0;
+            width: parent.width;
+            height: root.picture-h;
+            background: Theme.launch-well;
+
+            Text {
+                text: "+";
+                color: Theme.fg-dim;
+                font-size: 22px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        Text {
+            x: 8px;
+            y: root.picture-h;
+            width: parent.width - 16px;
+            height: 36px;
+            text: card.label;
+            color: Theme.fg;
+            font-size: Theme.fs-sm;
+            font-weight: index == root.current ? Theme.weight-title : Theme.weight-body;
+            wrap: word-wrap;
+            overflow: elide;
+            vertical-alignment: center;
+        }
+
+        // The outline over the picture, so it is not hidden under it.
+        Rectangle {
+            border-radius: Theme.r;
+            border-width: index == root.current ? 2px : 1px;
+            border-color: index == root.current ? Theme.accent : Theme.line;
+        }
+
+        touch := TouchArea {
+            enabled: root.enabled;
+            mouse-cursor: pointer;
+            clicked => { root.changed(index); }
+        }
+    }
+}
 
 // The shape of a frame: a box of the frame's own proportions inside a
 // square of room, so 9:16 reads as upright at a glance and 4:3 as nearly
@@ -1536,8 +1635,7 @@ component VersionLine inherits HorizontalLayout {
 
 // The cards, and the words on them, in one place: the wide page lays them
 // as a column beside the projects or a grid under them, the narrow one as
-// a list. The phone has no Shortcuts page in its Settings, so it has no
-// card for one.
+// a list.
 global Learn {
     out property <LearnItem> docs: {
         name: "guides", glyph: Glyph.book, external: true,
@@ -1564,7 +1662,6 @@ global Learn {
         title: I18n.t("start.reportProblem"), note: I18n.t("start.reportProblemNote"),
     };
     out property <[LearnItem]> desk: [docs, guide, keys, code, chat, report];
-    out property <[LearnItem]> phone: [docs, guide, code, chat, report];
 }
 
 // The learn cards as a grid of rows, for the wide page under the projects
@@ -1607,7 +1704,6 @@ component WideHome inherits Rectangle {
     in property <int> sort;
     in property <bool> busy;
     in property <string> version;
-    in property <bool> can-drop;
 
     callback compose();
     callback open();
@@ -1629,7 +1725,7 @@ component WideHome inherits Rectangle {
     property <length> main-w: root.aside ? root.content-w - root.aside-w - root.aside-gap
         : root.content-w;
     /// The drop tile, beside New and Open, where they still have room.
-    property <bool> drop-tile: root.can-drop && root.main-w >= 940px;
+    property <bool> drop-tile: root.main-w >= 940px;
     /// The create row shares its width by weight - New a third again as
     /// wide as the others - and not by what its words would like, so a
     /// longer line on one tile does not shoulder the others aside.
@@ -1714,7 +1810,7 @@ component WideHome inherits Rectangle {
                 }
 
                 // Where the tile does not fit, a line says what it would.
-                if root.can-drop && !root.drop-tile: VerticalLayout {
+                if !root.drop-tile: VerticalLayout {
                     padding-top: 12px;
                     Text {
                         text: I18n.t("start.dropHint");
@@ -1864,8 +1960,8 @@ component WideHome inherits Rectangle {
     }
 }
 
-// The narrow page: a phone held upright, or a desk's window squeezed that
-// far. Stacked the way a phone's own apps are - the greeting with Settings
+// The narrow page: a window squeezed under 680px. Stacked the way a
+// phone's own apps are - the greeting with Settings
 // beside it, New project across the width under the thumb, the projects as
 // a list, and the learn cards as one grouped list at the foot.
 component NarrowHome inherits Rectangle {
@@ -1874,10 +1970,6 @@ component NarrowHome inherits Rectangle {
     in property <string> query;
     in property <bool> busy;
     in property <string> version;
-    /// A phone: no folder picker, so no Open; projects live in the app's
-    /// own folder, which the page already lists. See platform::pick_folder.
-    /// https://github.com/jub0t/Concat/issues/222
-    in property <bool> phone;
 
     callback compose();
     callback open();
@@ -1922,7 +2014,7 @@ component NarrowHome inherits Rectangle {
                     wrap: word-wrap;
                 }
 
-                if !root.phone: VerticalLayout {
+                VerticalLayout {
                     alignment: center;
                     BarAction {
                         glyph: Glyph.folder;
@@ -2026,7 +2118,7 @@ component NarrowHome inherits Rectangle {
                 list := VerticalLayout {
                     padding: 6px;
 
-                    for item[index] in (root.phone ? Learn.phone : Learn.desk): VerticalLayout {
+                    for item[index] in Learn.desk: VerticalLayout {
                         if index > 0: Rectangle {
                             height: 1px;
                             background: Theme.line;
@@ -2067,9 +2159,6 @@ export component StartScreen inherits Rectangle {
     in property <bool> busy;
     /// "0.2.7"
     in property <string> version;
-    /// A file can be dragged in from the system here.
-    in property <bool> can-drop;
-    in property <bool> phone;
 
     /// Put up the sheet a new project is described on.
     callback compose();
@@ -2084,7 +2173,7 @@ export component StartScreen inherits Rectangle {
     /// One of the page's links, by name; see `start::link` in Rust.
     callback link(name: string);
 
-    property <bool> narrow: root.phone || root.width < 680px;
+    property <bool> narrow: root.width < 680px;
 
     background: Theme.launch-page;
     clip: true;
@@ -2098,7 +2187,6 @@ export component StartScreen inherits Rectangle {
         sort: root.sort;
         busy: root.busy;
         version: root.version;
-        can-drop: root.can-drop;
         compose => { root.compose(); }
         open => { root.open(); }
         open-recent(path) => { root.open-recent(path); }
@@ -2117,7 +2205,6 @@ export component StartScreen inherits Rectangle {
         query: root.query;
         busy: root.busy;
         version: root.version;
-        phone: root.phone;
         compose => { root.compose(); }
         open => { root.open(); }
         open-settings => { root.open-settings(); }
@@ -2152,6 +2239,7 @@ export component NewProjectDialog inherits Modal {
     callback name-edited(name: string);
     callback location-edited(path: string);
     callback browse();
+    callback style-changed(index: int);
     callback aspect-changed(index: int);
     callback size-changed(index: int);
     callback rate-changed(index: int);
@@ -2162,17 +2250,13 @@ export component NewProjectDialog inherits Modal {
     callback create();
     callback dismiss-error();
 
-    /// A phone held upright: every label over its value, every chip row
-    /// across the width, the button across the width with its line under
-    /// it.
-    /// A phone: no folder picker, so no Open and no Choose - projects live
-    /// in the app's own folder, which the page already lists, and the
-    /// location is shown rather than typed. See platform::pick_folder.
-    /// https://github.com/jub0t/Concat/issues/222
-    in property <bool> phone;
+    /// Narrow: every label over its value, every chip row across the
+    /// width, the button across the width with its line under it.
     property <bool> narrow: root.width < 680px;
     /// A project needs somewhere to go. Everything else has a default.
     property <bool> can-create: !root.data.busy && root.data.location != "";
+    /// The frame's rows are shown: Change was pressed.
+    property <bool> frame-open: false;
 
     open: root.data.composing;
     title: I18n.t("start.newProject");
@@ -2237,6 +2321,32 @@ export component NewProjectDialog inherits Modal {
             }
         }
 
+        // The style first: it decides the frame below, and what the
+        // project is for.
+        FormRow {
+            label: I18n.upper("start.style");
+            stacked: root.narrow;
+
+            VerticalLayout {
+                spacing: 8px;
+
+                StyleGrid {
+                    cards: root.data.style-cards;
+                    current: root.data.style;
+                    enabled: !root.data.busy;
+                    columns: root.narrow ? 3 : 4;
+                    changed(index) => { root.style-changed(index); }
+                }
+
+                Text {
+                    text: root.data.style-note;
+                    color: Theme.fg-muted;
+                    font-size: Theme.fs;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
         FormRow {
             label: I18n.upper("common.name");
             stacked: root.narrow;
@@ -2250,10 +2360,7 @@ export component NewProjectDialog inherits Modal {
             }
         }
 
-        // A desk's question. A phone keeps its projects in the app's own
-        // folder, as every phone editor does, and a path there is nothing
-        // anybody can browse to, so the row is not shown.
-        if !root.phone: FormRow {
+        FormRow {
             label: I18n.upper("start.location");
             stacked: root.narrow;
 
@@ -2291,179 +2398,212 @@ export component NewProjectDialog inherits Modal {
             }
         }
 
-        FormRow {
-            label: I18n.upper("start.shape");
+        // The frame in one line until asked for: a style sets it, and most
+        // people never change it; folded, the sheet fits a laptop screen
+        // with the style cards above.
+        if !root.frame-open: FormRow {
+            label: I18n.upper("start.frame");
             stacked: root.narrow;
 
             HorizontalLayout {
-                spacing: 16px;
+                spacing: 12px;
 
-                ChipRow {
+                Text {
                     horizontal-stretch: 1;
-                    options: root.aspects;
-                    current: root.data.aspect;
-                    // A typed frame is its own shape.
-                    enabled: !root.data.busy && root.data.size < root.sizes.length;
-                    block: root.narrow;
-                    // Seven shapes are past a phone's width; four to a
-                    // row there, as the sizes wrap three.
-                    per-row: root.narrow ? 4 : 0;
-                    changed(index) => { root.aspect-changed(index); }
+                    text: root.aspects[root.data.aspect].label + " · " + root.data.size-readout
+                        + " · " + root.data.rate-readout;
+                    color: Theme.fg;
+                    font-size: Theme.fs;
+                    vertical-alignment: center;
                 }
 
-                // The chosen frame at the row's end, drawn rather than
-                // described: the one thing on this sheet that shows what
-                // the numbers mean.
-                if !root.narrow: VerticalLayout {
+                VerticalLayout {
                     alignment: center;
                     horizontal-stretch: 0;
-                    FrameShape {
-                        room: 32px;
-                        ratio: root.data.frame-aspect;
+                    LinkButton {
+                        label: I18n.t("start.changeFrame");
+                        enabled: !root.data.busy;
+                        clicked => { root.frame-open = true; }
                     }
                 }
             }
         }
 
-        FormRow {
-            label: I18n.upper("common.size");
-            stacked: root.narrow;
-
-            VerticalLayout {
-                spacing: 10px;
+        if root.frame-open: VerticalLayout {
+            FormRow {
+                label: I18n.upper("start.shape");
+                stacked: root.narrow;
 
                 HorizontalLayout {
                     spacing: 16px;
 
                     ChipRow {
                         horizontal-stretch: 1;
-                        options: root.sizes;
-                        extra: I18n.t("common.custom");
-                        current: root.data.size;
-                        enabled: !root.data.busy;
+                        options: root.aspects;
+                        current: root.data.aspect;
+                        // A typed frame is its own shape.
+                        enabled: !root.data.busy && root.data.size < root.sizes.length;
                         block: root.narrow;
-                        // Five chips and the readout do not fit one line of
-                        // a phone held upright: 4K and Custom ran off the
-                        // edge out of reach (#356). Three to a row there,
-                        // as the frame rates wrap four.
-                        per-row: root.narrow ? 3 : 0;
-                        changed(index) => { root.size-changed(index); }
+                        // Seven shapes are past a phone's width; four to a
+                        // row there, as the sizes wrap three.
+                        per-row: root.narrow ? 4 : 0;
+                        changed(index) => { root.aspect-changed(index); }
                     }
 
-                    VerticalLayout {
+                    // The chosen frame at the row's end, drawn rather than
+                    // described: the one thing on this sheet that shows what
+                    // the numbers mean.
+                    if !root.narrow: VerticalLayout {
                         alignment: center;
                         horizontal-stretch: 0;
-                        Text {
-                            text: root.data.size-readout;
-                            color: Theme.fg-dim;
-                            font-family: Theme.font-technical;
-                            font-size: Theme.fs-sm;
+                        FrameShape {
+                            room: 32px;
+                            ratio: root.data.frame-aspect;
                         }
                     }
                 }
-
-                // The typed frame: width by height, each side even and
-                // within 16 to 8192, which Rust rounds a typed number to.
-                if root.data.size == root.sizes.length: HorizontalLayout {
-                    spacing: 8px;
-                    alignment: start;
-
-                    NumberField {
-                        width: 96px;
-                        value: root.data.custom-width;
-                        minimum: 16;
-                        maximum: 8192;
-                        step: 2;
-                        unit: "W";
-                        enabled: !root.data.busy;
-                        changed(value) => { root.custom-width-edited(value); }
-                    }
-
-                    Text {
-                        text: "×";
-                        color: Theme.fg-dim;
-                        vertical-alignment: center;
-                    }
-
-                    NumberField {
-                        width: 96px;
-                        value: root.data.custom-height;
-                        minimum: 16;
-                        maximum: 8192;
-                        step: 2;
-                        unit: "H";
-                        enabled: !root.data.busy;
-                        changed(value) => { root.custom-height-edited(value); }
-                    }
-                }
             }
-        }
 
-        FormRow {
-            label: I18n.upper("common.frameRate");
-            stacked: root.narrow;
+            FormRow {
+                label: I18n.upper("common.size");
+                stacked: root.narrow;
 
-            VerticalLayout {
-                spacing: 10px;
+                VerticalLayout {
+                    spacing: 10px;
 
-                HorizontalLayout {
-                    spacing: 16px;
+                    HorizontalLayout {
+                        spacing: 16px;
 
-                    // Eleven rates and Custom in a list, not a wall of
-                    // twelve buttons: most edits want one of three, and
-                    // the rest are there when the list is opened.
-                    Select {
-                        width: 168px;
-                        options: root.data.rate-options;
-                        current: root.data.rate;
-                        enabled: !root.data.busy;
-                        changed(index) => { root.rate-changed(index); }
+                        ChipRow {
+                            horizontal-stretch: 1;
+                            options: root.sizes;
+                            extra: I18n.t("common.custom");
+                            current: root.data.size;
+                            enabled: !root.data.busy;
+                            block: root.narrow;
+                            // Five chips and the readout do not fit one line of
+                            // a phone held upright: 4K and Custom ran off the
+                            // edge out of reach (#356). Three to a row there,
+                            // as the frame rates wrap four.
+                            per-row: root.narrow ? 3 : 0;
+                            changed(index) => { root.size-changed(index); }
+                        }
+
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 0;
+                            Text {
+                                text: root.data.size-readout;
+                                color: Theme.fg-dim;
+                                font-family: Theme.font-technical;
+                                font-size: Theme.fs-sm;
+                            }
+                        }
                     }
 
-                    Rectangle { horizontal-stretch: 1; }
+                    // The typed frame: width by height, each side even and
+                    // within 16 to 8192, which Rust rounds a typed number to.
+                    if root.data.size == root.sizes.length: HorizontalLayout {
+                        spacing: 8px;
+                        alignment: start;
 
-                    VerticalLayout {
-                        alignment: center;
-                        horizontal-stretch: 0;
+                        NumberField {
+                            width: 96px;
+                            value: root.data.custom-width;
+                            minimum: 16;
+                            maximum: 8192;
+                            step: 2;
+                            unit: "W";
+                            enabled: !root.data.busy;
+                            changed(value) => { root.custom-width-edited(value); }
+                        }
+
                         Text {
-                            text: root.data.rate-readout;
+                            text: "×";
                             color: Theme.fg-dim;
-                            font-family: Theme.font-technical;
-                            font-size: Theme.fs-sm;
+                            vertical-alignment: center;
+                        }
+
+                        NumberField {
+                            width: 96px;
+                            value: root.data.custom-height;
+                            minimum: 16;
+                            maximum: 8192;
+                            step: 2;
+                            unit: "H";
+                            enabled: !root.data.busy;
+                            changed(value) => { root.custom-height-edited(value); }
                         }
                     }
                 }
+            }
 
-                // The typed rate, from 1 to 240. The readout above says the
-                // fraction it is kept as: 23.976 is 24000/1001.
-                if root.data.rate == root.rates.length: HorizontalLayout {
-                    alignment: start;
+            FormRow {
+                label: I18n.upper("common.frameRate");
+                stacked: root.narrow;
 
-                    NumberField {
-                        width: 112px;
-                        value: root.data.custom-fps;
-                        minimum: 1;
-                        maximum: 240;
-                        step: 1;
-                        precision: 3;
-                        unit: "fps";
-                        enabled: !root.data.busy;
-                        changed(value) => { root.custom-fps-edited(value); }
+                VerticalLayout {
+                    spacing: 10px;
+
+                    HorizontalLayout {
+                        spacing: 16px;
+
+                        // Eleven rates and Custom in a list, not a wall of
+                        // twelve buttons: most edits want one of three, and
+                        // the rest are there when the list is opened.
+                        Select {
+                            width: 168px;
+                            options: root.data.rate-options;
+                            current: root.data.rate;
+                            enabled: !root.data.busy;
+                            changed(index) => { root.rate-changed(index); }
+                        }
+
+                        Rectangle { horizontal-stretch: 1; }
+
+                        VerticalLayout {
+                            alignment: center;
+                            horizontal-stretch: 0;
+                            Text {
+                                text: root.data.rate-readout;
+                                color: Theme.fg-dim;
+                                font-family: Theme.font-technical;
+                                font-size: Theme.fs-sm;
+                            }
+                        }
+                    }
+
+                    // The typed rate, from 1 to 240. The readout above says the
+                    // fraction it is kept as: 23.976 is 24000/1001.
+                    if root.data.rate == root.rates.length: HorizontalLayout {
+                        alignment: start;
+
+                        NumberField {
+                            width: 112px;
+                            value: root.data.custom-fps;
+                            minimum: 1;
+                            maximum: 240;
+                            step: 1;
+                            precision: 3;
+                            unit: "fps";
+                            enabled: !root.data.busy;
+                            changed(value) => { root.custom-fps-edited(value); }
+                        }
                     }
                 }
             }
-        }
 
-        // What shows where no picture covers the frame; see CanvasPicker.
-        FormRow {
-            label: I18n.upper("start.background");
-            last: true;
-            stacked: root.narrow;
+            // What shows where no picture covers the frame; see CanvasPicker.
+            FormRow {
+                label: I18n.upper("start.background");
+                last: true;
+                stacked: root.narrow;
 
-            CanvasPicker {
-                value: root.data.canvas;
-                enabled: !root.data.busy;
-                changed(value) => { root.canvas-changed(value); }
+                CanvasPicker {
+                    value: root.data.canvas;
+                    enabled: !root.data.busy;
+                    changed(value) => { root.canvas-changed(value); }
+                }
             }
         }
 

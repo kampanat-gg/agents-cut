@@ -302,6 +302,21 @@ impl Session {
         self.editor.to_document(&self.settings)
     }
 
+    /// A copy of the edit as it stands, with no history, for a reader on
+    /// another thread: the API rendering a frame of, or exporting, the
+    /// project the window has open. Edits to the copy go nowhere.
+    pub fn detached(&self) -> Session {
+        let editor = Editor::from_document(&self.document())
+            .unwrap_or_else(|| Editor::with_video(self.video()));
+        Session {
+            path: self.path.clone(),
+            settings: self.settings.clone(),
+            editor,
+            upgraded: Vec::new(),
+            retired: Default::default(),
+        }
+    }
+
     /// The active timeline flattened for rendering. This is what export and
     /// preview consume: the engine flattens its own session, so the pixels
     /// rendered are the model's, never a copy of it.

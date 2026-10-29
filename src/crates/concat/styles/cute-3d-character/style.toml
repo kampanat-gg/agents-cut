@@ -1,0 +1,28 @@
+# A style: what a new project made with it starts as. The folder's
+# CLAUDE.md is copied into the project, where the agent reads it.
+
+name = "Cute 3D character"
+name_th = "ตัวการ์ตูน 3D น่ารัก"
+description = "A cute 3D mascot or pet that explains, reacts and tells stories, kept the same in every episode."
+description_th = "มาสคอตหรือสัตว์เลี้ยง 3D น่ารัก ที่อธิบาย ทำหน้า และเล่าเรื่อง หน้าตาเหมือนเดิมทุกตอน"
+aspect = "9:16"
+
+[[starters]]
+label = "Create the mascot"
+label_th = "สร้างมาสคอต"
+prompt = "Create this channel's mascot from this description and save its reference pictures in characters/: "
+prompt_th = "สร้างมาสคอตของช่องจากคำอธิบายนี้ แล้วเซฟภาพอ้างอิงไว้ใน characters/: "
+fill = true
+
+[[starters]]
+label = "Mascot explains a topic"
+label_th = "มาสคอตอธิบายเรื่อง"
+prompt = "Make a new episode where the mascot explains: "
+prompt_th = "ทำตอนใหม่ให้มาสคอตอธิบายเรื่อง: "
+fill = true
+
+[[starters]]
+label = "Turn my pet into 3D"
+label_th = "ทำสัตว์เลี้ยงของฉันเป็น 3D"
+prompt = "Turn the pet in the photos in assets/ into a 3D character and save its reference pictures in characters/."
+prompt_th = "ทำสัตว์เลี้ยงจากรูปใน assets/ เป็นตัวละคร 3D แล้วเซฟภาพอ้างอิงไว้ใน characters/"

@@ -22,7 +22,7 @@ Effects, filters, transitions and text presets are data, not interface:
 their words are always the English their manifests write, and have no
 lines here.
 
-en.json is the inventory a translator starts from; see TRANSLATING.md.
+en.json is the inventory a translator starts from.
 
 The app speaks the languages the READMEs are written in, one for one:
 every `locales/<code>.json` is compiled in through `BUILT_IN` in

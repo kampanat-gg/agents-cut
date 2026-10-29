@@ -165,21 +165,6 @@ impl VideoCodec {
         }
         let macos = cfg!(target_os = "macos");
         let windows = cfg!(target_os = "windows");
-        if cfg!(target_os = "android") {
-            return match self {
-                VideoCodec::H264 => &["h264_mediacodec"],
-                VideoCodec::Hevc => &["hevc_mediacodec"],
-                VideoCodec::Av1 => &["av1_mediacodec"],
-                VideoCodec::ProRes4444 | VideoCodec::Vp9Alpha => &[],
-            };
-        }
-        if cfg!(target_os = "ios") {
-            return match self {
-                VideoCodec::H264 => &["h264_videotoolbox"],
-                VideoCodec::Hevc => &["hevc_videotoolbox"],
-                VideoCodec::Av1 | VideoCodec::ProRes4444 | VideoCodec::Vp9Alpha => &[],
-            };
-        }
         match self {
             VideoCodec::H264 if macos => &["libx264", "h264_videotoolbox"],
             VideoCodec::H264 if windows => {
@@ -521,7 +506,7 @@ impl Family {
 /// laptops where libcuda crashes that is the usual way to say so.
 fn switched_on(encoder_name: &str, var: impl Fn(&str) -> Option<std::ffi::OsString>) -> bool {
     let family = Family::of(encoder_name);
-    if !family.hardware() || cfg!(any(target_os = "android", target_os = "ios")) {
+    if !family.hardware() {
         return true;
     }
     if var("CONCAT_HARDWARE_ENCODE").is_some_and(|value| value.to_string_lossy().trim() == "0") {
@@ -2540,11 +2525,10 @@ mod tests {
         }
     }
 
-    /// Every codec has an encoder listed for every platform but AV1 on
-    /// iOS, and a phone lists its hardware alone, whatever `hardware` says:
-    /// its FFmpeg has nothing else.
+    /// Every codec has an encoder listed, and one that keeps an alpha
+    /// layer lists the CPU's alone.
     #[test]
-    fn a_phone_is_asked_for_its_own_hardware() {
+    fn every_codec_lists_its_encoders() {
         for codec in VideoCodec::ALL {
             for hardware in [false, true] {
                 let names = codec.encoders(hardware);
@@ -2556,19 +2540,13 @@ mod tests {
                         "{codec:?}"
                     );
                     assert!(!names.is_empty(), "{codec:?}");
-                } else if cfg!(target_os = "android") {
-                    assert!(names.iter().all(|name| name.ends_with("_mediacodec")));
-                } else if cfg!(target_os = "ios") {
-                    assert!(names.iter().all(|name| name.ends_with("_videotoolbox")));
                 } else {
                     assert!(!names.is_empty(), "{codec:?}");
                 }
             }
             // A desktop has a software encoder behind any hardware one, so
             // what is linked is what can be encoded.
-            if !cfg!(any(target_os = "android", target_os = "ios")) {
-                assert_eq!(codec.encodable(), codec.available(), "{codec:?}");
-            }
+            assert_eq!(codec.encodable(), codec.available(), "{codec:?}");
         }
     }
 
@@ -2642,23 +2620,22 @@ mod tests {
                     .map(|(_, value)| std::ffi::OsString::from(value))
             }
         }
-        let desktop = !cfg!(any(target_os = "android", target_os = "ios"));
         assert!(switched_on("hevc_nvenc", env(&[])));
         assert!(switched_on(
             "libx265",
             env(&[("CONCAT_HARDWARE_ENCODE", "0")])
         ));
-        assert_eq!(
-            switched_on("hevc_qsv", env(&[("CONCAT_HARDWARE_ENCODE", "0")])),
-            !desktop
-        );
+        assert!(!switched_on(
+            "hevc_qsv",
+            env(&[("CONCAT_HARDWARE_ENCODE", "0")])
+        ));
         assert!(switched_on(
             "hevc_qsv",
             env(&[("CONCAT_HARDWARE_ENCODE", "1")])
         ));
         for hidden in ["", "-1", " -1,0"] {
             let vars = [("CUDA_VISIBLE_DEVICES", hidden)];
-            assert_eq!(switched_on("av1_nvenc", env(&vars)), !desktop, "{hidden:?}");
+            assert!(!switched_on("av1_nvenc", env(&vars)), "{hidden:?}");
             assert!(switched_on("av1_qsv", env(&vars)), "{hidden:?}");
         }
         assert!(switched_on(

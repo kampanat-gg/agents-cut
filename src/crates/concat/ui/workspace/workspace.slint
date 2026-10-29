@@ -27,7 +27,8 @@ export component Workspace inherits Rectangle {
     // halves of a split, at whatever depth, and only the side walking the tree
     // knows where those are.
 
-    background: Theme.page;
+    // Seen only between two panes: the hairline that divides them.
+    background: Theme.gutter;
 
     // The box, on the way up. `init` as well as the two `changed` handlers,
     // because a window that opens and is never resized still has to be laid

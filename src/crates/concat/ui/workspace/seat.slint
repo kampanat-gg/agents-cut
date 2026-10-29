@@ -11,6 +11,7 @@ import { MediaPane, SourcePreview } from "media-pane.slint";
 import { PreviewPane } from "preview-pane.slint";
 import { TimelinePane } from "timeline-pane.slint";
 import { KeyframesPane } from "keyframes-pane.slint";
+import { FilesPane } from "files-pane.slint";
 
 // One box of the workspace, showing whichever view its `kind` names.
 //
@@ -364,6 +365,18 @@ export component Seat inherits Rectangle {
             clip-commit => { Editor.clip-commit(); }
     }
 
+    if root.kind == PaneKind.files: FilesPane {
+            x: 0;
+            y: 0;
+            width: root.width;
+            height: root.height;
+
+            pane-picked(kind) => { root.picked(kind); }
+            pane-seat: root.index;
+            pane-removable: Editor.seats.length > 1;
+            pane-removed => { root.removed(); }
+    }
+
     if root.kind == PaneKind.timeline: TimelinePane {
             x: 0;
             y: 0;
@@ -455,6 +468,10 @@ export component Seat inherits Rectangle {
             menu-items: Editor.menu-items;
             menu-height: Editor.menu-height;
             menu-token: Editor.menu-token;
+            key-menu-token: Editor.key-menu-token;
+            key-menu-clip: Editor.key-menu-clip;
+            key-menu-start: Editor.key-menu-start;
+            key-menu-row: Editor.key-menu-row;
             clip-context(id) => { Editor.clip-context(id); }
             menu-selected(id) => { Editor.menu-selected(id); }
             band-selected(a, b, c, d, additive) => { Editor.band-selected(a, b, c, d, additive); }

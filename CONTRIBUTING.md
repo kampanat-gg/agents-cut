@@ -54,8 +54,8 @@ cd src && cargo fmt --check && cargo clippy --all-targets -- -D warnings && carg
 
 If you added or changed text the interface shows, also run
 `python3 scripts/locales.py` so the string inventory follows; CI checks it.
-Translations live in one JSON file per language; see
-[`TRANSLATING.md`](TRANSLATING.md).
+Translations live in one JSON file per language in
+`src/crates/concat/locales/`.
 
 If you added or changed a downloadable model, put it in
 [`models/manifest.toml`](models/manifest.toml) as well as the engine table it
@@ -77,19 +77,7 @@ around you; the engine avoids cleverness on purpose.
 
 Concat is **AGPL-3.0-or-later** ([`LICENSE`](LICENSE)).
 
-Contributions are accepted under the agreement in [`CLA.md`](CLA.md). **You
-assign the copyright in your contribution to Concat's owner**, and get a
-licence back to use your own work for anything, plus a promise that it always
-stays open source. Copyright in one place is what makes the AGPL enforceable
-against companies that take the code without honouring it.
 
-Sign off your commits to indicate agreement:
-
-```sh
-git commit -s -m "your message"
-```
-
-Typo and documentation fixes do not need a sign-off.
 
 ### File headers
 

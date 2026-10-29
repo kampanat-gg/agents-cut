@@ -14,6 +14,7 @@ import { Wave } from "../primitives/wave.slint";
 import { ContextMenu, MenuItemData } from "../primitives/context-menu.slint";
 import { SourcePreview } from "source-preview.slint";
 import { Sounds, SoundList, VoiceList } from "audio-page.slint";
+import { Build } from "../build.slint";
 
 export { SourcePreview }
 
@@ -64,6 +65,8 @@ export struct MediaItemData {
     duration: float,
     /// The file's format, lower-case, as the stamp on a still: "png", "jpg".
     format: string,
+    /// A code clip: an SVG drawn from its code, marked `</>`.
+    code: bool,
     /// The artwork, once something has produced it — the first frame of a
     /// filmstrip for footage, a drawn waveform for audio. Empty until then,
     /// which is what the tinted fallback below is for. Nothing decodes yet, so
@@ -572,6 +575,26 @@ export component MediaCard inherits Rectangle {
                 // what kind a card is — footage carries a duration stamp, audio
                 // is a waveform, a still says its format — so a badge would
                 // repeat information the card gives away at a glance.
+
+                // A code clip's mark, top left, on the same scrim as the
+                // stamp: a picture made from code looks like any other.
+                if root.item.code: Rectangle {
+                    x: 4px;
+                    y: 4px;
+                    width: code-mark.width + 7px;
+                    height: code-mark.height + 2px;
+                    border-radius: Theme.r-xs;
+                    background: Theme.scrim;
+
+                    code-mark := Text {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        text: "</>";
+                        color: Theme.on-scrim;
+                        font-family: Theme.font-technical;
+                        font-size: Theme.fs-xs;
+                    }
+                }
 
                 // Duration, bottom right, on its own scrim because what is behind
                 // it is a video frame and cannot be relied on for contrast.
@@ -2186,20 +2209,22 @@ export component MediaPane inherits Rectangle {
                             current: root.audio-category == 0;
                             clicked => { root.audio-category = 0; }
                         }
-                        CategoryHeading {
+                        // The voices are Text to speech's, and a build
+                        // without it has no shelf of them.
+                        if Build.speech-ai: CategoryHeading {
                             height: 26px;
                             title: I18n.t("voices.voices");
                             open: root.voices-open;
                             toggled => { root.voices-open = !root.voices-open; }
                         }
-                        if root.voices-open: CategoryRow {
+                        if root.voices-open && Build.speech-ai: CategoryRow {
                             height: 24px;
                             label: I18n.t("voices.voices");
                             count: Sounds.voices-saved.length;
                             current: root.audio-category == 10;
                             clicked => { root.audio-category = 10; }
                         }
-                        if root.voices-open: CategoryRow {
+                        if root.voices-open && Build.speech-ai: CategoryRow {
                             height: 24px;
                             label: I18n.t("voices.styles");
                             current: root.audio-category == 11;
@@ -2573,7 +2598,7 @@ export component MediaPane inherits Rectangle {
                 // Voices: the user's saved clones and the models' own
                 // speakers, or the styles; a click opens Text to speech
                 // on one.
-                if root.tab == 8 && root.audio-category >= 10: VerticalLayout {
+                if root.tab == 8 && root.audio-category >= 10 && Build.speech-ai: VerticalLayout {
                     padding: 8px;
                     spacing: 8px;
 

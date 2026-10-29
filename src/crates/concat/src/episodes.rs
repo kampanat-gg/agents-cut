@@ -1,0 +1,341 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jareer Abdullah and Concat contributors
+
+//! A channel's episodes as the files the agent keeps for them: each
+//! video's folder under `episodes/`, its `brief.md` (title, status,
+//! synopsis) and its `storyboard.md` (the beats). The agent's brief says
+//! how they are written; this reads them for the side panel's cards, the
+//! storyboard view and each episode's own conversation.
+//!
+//! A timeline finds its folder by its number: "EP3 Flying Dutchman" is
+//! the folder that starts `ep03-`.
+
+use std::path::{Path, PathBuf};
+
+/// The folder episodes live in, in a project's.
+pub const FOLDER: &str = "episodes";
+
+/// What an episode's `brief.md` says about it up front.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Brief {
+    pub title: String,
+    /// `idea`, `storyboard`, `building`, `done` or `exported`; empty when
+    /// the brief does not say.
+    pub status: String,
+    pub synopsis: String,
+}
+
+/// One beat of a storyboard: its span and name, and what is heard, seen,
+/// moved and played.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Beat {
+    pub time: String,
+    pub title: String,
+    pub voice: String,
+    pub picture: String,
+    /// The picture's file, relative to the episode's folder, when the
+    /// line names one that is there.
+    pub image: Option<PathBuf>,
+    pub motion: String,
+    pub sound: String,
+    /// The picture is made with code: its line starts `graphic`, or names
+    /// an SVG.
+    pub graphic: bool,
+}
+
+/// The episode number in a timeline's name: "EP3 Flying Dutchman" is 3,
+/// and so are "ep03-flying-dutchman", "EP 3" and "Ep.3".
+pub fn number_of(name: &str) -> Option<u32> {
+    let rest = name.trim();
+    let rest = rest
+        .strip_prefix("EP")
+        .or_else(|| rest.strip_prefix("Ep"))
+        .or_else(|| rest.strip_prefix("ep"))?;
+    let rest = rest.trim_start_matches([' ', '.', '-', '_']);
+    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+    digits.parse().ok()
+}
+
+/// The number and name a video takes when it becomes an episode: the
+/// number its name already has, or `next`; a name that is only
+/// "Timeline 2" becomes the number alone, any other keeps its words
+/// after it.
+pub fn named(name: &str, next: u32) -> (u32, String) {
+    if let Some(number) = number_of(name) {
+        return (number, name.to_owned());
+    }
+    let untitled = name
+        .trim()
+        .strip_prefix("Timeline")
+        .is_some_and(|rest| rest.trim().chars().all(|c| c.is_ascii_digit()));
+    if untitled || name.trim().is_empty() {
+        (next, format!("EP{next}"))
+    } else {
+        (next, format!("EP{next} {}", name.trim()))
+    }
+}
+
+/// The folder of the episode a timeline named `name` is, relative to the
+/// project: the one under `episodes/` that starts `epNN-` for its number.
+pub fn folder_of(project: &Path, name: &str) -> Option<String> {
+    let number = number_of(name)?;
+    let prefix = format!("ep{number:02}-");
+    let read = std::fs::read_dir(project.join(FOLDER)).ok()?;
+    let mut found: Vec<String> = read
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|folder| folder.to_lowercase().starts_with(&prefix))
+        .collect();
+    found.sort();
+    found
+        .into_iter()
+        .next()
+        .map(|folder| format!("{FOLDER}/{folder}"))
+}
+
+/// The number a new episode takes: one past the highest a timeline's name
+/// or a folder under `episodes/` already has.
+pub fn next_number<'a>(project: &Path, names: impl IntoIterator<Item = &'a str>) -> u32 {
+    let folders: Vec<String> = std::fs::read_dir(project.join(FOLDER))
+        .map(|read| {
+            read.flatten()
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    names
+        .into_iter()
+        .filter_map(number_of)
+        .chain(folders.iter().filter_map(|folder| number_of(folder)))
+        .max()
+        .unwrap_or(0)
+        + 1
+}
+
+/// Starts episode `number`: its folder, `episodes/epNN-new/`, with a
+/// brief that names it and says it is an idea yet. The folder relative to
+/// the project.
+pub fn start(project: &Path, number: u32) -> Result<String, String> {
+    let folder = format!("{FOLDER}/ep{number:02}-new");
+    let dir = project.join(&folder);
+    std::fs::create_dir_all(&dir).map_err(|error| format!("{}: {error}", dir.display()))?;
+    let brief = dir.join("brief.md");
+    if !brief.exists() {
+        std::fs::write(
+            &brief,
+            format!("---\ntitle: EP{number}\nstatus: idea\nsynopsis:\n---\n"),
+        )
+        .map_err(|error| format!("{}: {error}", brief.display()))?;
+    }
+    Ok(folder)
+}
+
+/// Whether two episode folders are the same episode: the same folder, or
+/// the same number after one was renamed ("ep04-new" is "ep04-lighthouse").
+pub fn same(a: &str, b: &str) -> bool {
+    let number = |folder: &str| {
+        Path::new(folder)
+            .file_name()
+            .and_then(|name| number_of(&name.to_string_lossy()))
+    };
+    a == b || number(a).is_some() && number(a) == number(b)
+}
+
+/// The front matter of `folder`'s `brief.md`; an empty brief when there
+/// is none.
+pub fn brief(project: &Path, folder: &str) -> Brief {
+    std::fs::read_to_string(project.join(folder).join("brief.md"))
+        .map(|text| parse_brief(&text))
+        .unwrap_or_default()
+}
+
+fn parse_brief(text: &str) -> Brief {
+    let mut brief = Brief::default();
+    let Some(rest) = text.trim_start().strip_prefix("---") else {
+        return brief;
+    };
+    let Some((front, _)) = rest.split_once("\n---") else {
+        return brief;
+    };
+    for line in front.lines() {
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        let value = value.trim().trim_matches('"').to_owned();
+        match key.trim() {
+            "title" => brief.title = value,
+            "status" => brief.status = value.to_lowercase(),
+            "synopsis" => brief.synopsis = value,
+            _ => {}
+        }
+    }
+    brief
+}
+
+/// The beats of `folder`'s `storyboard.md`, in order.
+pub fn storyboard(project: &Path, folder: &str) -> Vec<Beat> {
+    let dir = project.join(folder);
+    let Ok(text) = std::fs::read_to_string(dir.join("storyboard.md")) else {
+        return Vec::new();
+    };
+    let mut beats = parse_storyboard(&text);
+    for beat in &mut beats {
+        beat.image = picture_file(&beat.picture).filter(|file| dir.join(file).is_file());
+    }
+    beats
+}
+
+fn parse_storyboard(text: &str) -> Vec<Beat> {
+    let mut beats: Vec<Beat> = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(heading) = line.strip_prefix("## ") {
+            let (time, title) = match heading.split_once('·') {
+                Some((time, title)) => (time.trim(), title.trim()),
+                None => (heading.trim(), ""),
+            };
+            beats.push(Beat {
+                time: time.to_owned(),
+                title: title.to_owned(),
+                ..Beat::default()
+            });
+            continue;
+        }
+        let Some(beat) = beats.last_mut() else {
+            continue;
+        };
+        let Some(item) = line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")) else {
+            continue;
+        };
+        let Some((key, value)) = item.split_once(':') else {
+            continue;
+        };
+        let value = value.trim().to_owned();
+        match key.trim().to_lowercase().as_str() {
+            "voice" | "narration" | "เสียงพากย์" | "พากย์" => {
+                beat.voice = value
+            }
+            "picture" | "image" | "visual" | "ภาพ" => {
+                beat.graphic = is_graphic(&value);
+                beat.picture = value;
+            }
+            "motion" | "move" | "การเคลื่อนไหว" => beat.motion = value,
+            "sound" | "music" | "sfx" | "เสียง" => beat.sound = value,
+            _ => {}
+        }
+    }
+    beats
+}
+
+/// Whether a beat's picture line is a picture made with code: "graphic -
+/// a map of …", or an SVG it names.
+fn is_graphic(picture: &str) -> bool {
+    let first = picture
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .trim_matches(['`', '"', ',', ':', '-'])
+        .to_lowercase();
+    first == "graphic" || first.ends_with(".svg")
+}
+
+/// The file a beat's picture line names, when it names one: its first
+/// word, if that is an image path.
+fn picture_file(picture: &str) -> Option<PathBuf> {
+    let first = picture.split_whitespace().next()?;
+    let first = first.trim_matches(['`', '"', ',']);
+    let image = ["png", "jpg", "jpeg", "webp", "gif", "webm"]
+        .iter()
+        .any(|extension| first.to_lowercase().ends_with(&format!(".{extension}")));
+    (image && !first.contains("..")).then(|| PathBuf::from(first))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_timeline_names_its_episode_by_number() {
+        assert_eq!(number_of("EP3 Flying Dutchman"), Some(3));
+        assert_eq!(number_of("ep12 Lanna"), Some(12));
+        assert_eq!(number_of("Timeline 1"), None);
+        assert_eq!(number_of("EP 4 Lanna"), Some(4));
+        assert_eq!(number_of("Ep.7"), Some(7));
+        assert_eq!(number_of("ep03-flying-dutchman"), Some(3));
+        assert_eq!(number_of("EPIC fails"), None);
+        assert_eq!(number_of("EP1 ก้าวเล็กๆ"), Some(1));
+    }
+
+    #[test]
+    fn a_video_becoming_an_episode_keeps_a_number_it_has() {
+        assert_eq!(named("EP1 ก้าวเล็กๆ", 6), (1, "EP1 ก้าวเล็กๆ".to_owned()));
+        assert_eq!(named("Timeline 2", 6), (6, "EP6".to_owned()));
+        assert_eq!(named("Timeline", 6), (6, "EP6".to_owned()));
+        assert_eq!(named("  ", 6), (6, "EP6".to_owned()));
+        assert_eq!(named("My intro", 6), (6, "EP6 My intro".to_owned()));
+        assert_eq!(
+            named("Timeline of Siam", 6),
+            (6, "EP6 Timeline of Siam".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_new_episode_takes_the_next_number_and_keeps_it_through_a_rename() {
+        let project = std::env::temp_dir().join(format!("concat-episodes-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&project);
+        std::fs::create_dir_all(project.join("episodes/ep03-flying-dutchman")).expect("folder");
+        assert_eq!(next_number(&project, ["EP1 Kraken", "Timeline 1"]), 4);
+        let folder = start(&project, 4).expect("started");
+        assert_eq!(folder, "episodes/ep04-new");
+        assert_eq!(brief(&project, &folder).title, "EP4");
+        assert_eq!(brief(&project, &folder).status, "idea");
+        assert_eq!(next_number(&project, []), 5);
+        assert!(same("episodes/ep04-new", "episodes/ep04-lighthouse"));
+        assert!(!same("episodes/ep04-new", "episodes/ep05-new"));
+        assert!(!same("", "episodes/ep05-new"));
+        let _ = std::fs::remove_dir_all(&project);
+    }
+
+    #[test]
+    fn a_brief_reads_its_front_matter() {
+        let brief = parse_brief(
+            "---\ntitle: EP3 Flying Dutchman\nstatus: Storyboard\nsynopsis: \"A ship that never lands.\"\n---\nFacts.",
+        );
+        assert_eq!(brief.title, "EP3 Flying Dutchman");
+        assert_eq!(brief.status, "storyboard");
+        assert_eq!(brief.synopsis, "A ship that never lands.");
+        assert_eq!(parse_brief("No front matter"), Brief::default());
+    }
+
+    #[test]
+    fn a_storyboard_reads_beat_by_beat() {
+        let beats = parse_storyboard(
+            "# EP3\n\n## 0:00-0:03 · Hook\n- Voice: \"Never see it.\"\n- Picture: images/ship.png - a ship in fog\n- Motion: slow push\n- Sound: a bell\n\n## 0:03-0:08\n- Voice: Next.\n",
+        );
+        assert_eq!(beats.len(), 2);
+        assert_eq!(beats[0].time, "0:00-0:03");
+        assert_eq!(beats[0].title, "Hook");
+        assert_eq!(beats[0].voice, "\"Never see it.\"");
+        assert_eq!(
+            picture_file(&beats[0].picture),
+            Some(PathBuf::from("images/ship.png"))
+        );
+        assert_eq!(beats[0].sound, "a bell");
+        assert_eq!(beats[1].title, "");
+        assert_eq!(picture_file("a ship in fog"), None);
+        assert!(!beats[0].graphic);
+    }
+
+    #[test]
+    fn a_picture_made_with_code_is_a_graphic() {
+        assert!(is_graphic("graphic - map of the Cape"));
+        assert!(is_graphic("Graphic: the route"));
+        assert!(is_graphic("`graphics/map.svg` the route"));
+        assert!(!is_graphic("images/ship.png - a ship"));
+        assert!(!is_graphic("a graphic novel cover"));
+        assert!(!is_graphic(""));
+        let beats = parse_storyboard("## 0:00-0:03\n- Picture: graphic - a map\n");
+        assert!(beats[0].graphic);
+    }
+}

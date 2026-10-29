@@ -1638,14 +1638,9 @@ fn best_compositor() -> Result<WgpuCompositor, String> {
 const NO_RENDERER: &str = "no GPU or software renderer is available to draw with - install \
      Mesa's Vulkan drivers (lavapipe)";
 
-/// On a phone there is nothing to install: the one GPU it has would not
-/// open, and the log says which and why (#312).
-#[cfg(any(target_os = "android", target_os = "ios"))]
-const NO_RENDERER: &str = "this device's GPU could not be used to draw with";
-
 /// Elsewhere the platform's own software renderer is always there, so
 /// this is a machine whose GPU and fallback both refused.
-#[cfg(not(any(target_os = "linux", target_os = "android", target_os = "ios")))]
+#[cfg(not(target_os = "linux"))]
 const NO_RENDERER: &str = "no GPU or software renderer is available to draw with";
 
 /// How many times an export's device may die under it before the export
@@ -3853,8 +3848,16 @@ mod tests {
             let frame = decoder.next_frame().expect("decodes").expect("a frame");
             let corner = frame.pixel(2, 2).expect("a pixel");
             let middle = frame.pixel(32, 32).expect("a pixel");
-            assert!(corner[3] <= 4, "{}: the corner is {corner:?}", codec.label());
-            assert!(middle[3] >= 250, "{}: the middle is {middle:?}", codec.label());
+            assert!(
+                corner[3] <= 4,
+                "{}: the corner is {corner:?}",
+                codec.label()
+            );
+            assert!(
+                middle[3] >= 250,
+                "{}: the middle is {middle:?}",
+                codec.label()
+            );
             assert!(
                 middle[0].abs_diff(200) <= 12 && middle[1].abs_diff(40) <= 12,
                 "{}: the middle is {middle:?}",
@@ -3884,7 +3887,10 @@ mod tests {
         let middle = frame.pixel(32, 32).expect("a pixel");
         assert!((130..=170).contains(&middle[0]), "the middle is {middle:?}");
         let corner = frame.pixel(2, 2).expect("a pixel");
-        assert!(corner[0] <= 8 && corner[3] == 255, "the corner is {corner:?}");
+        assert!(
+            corner[0] <= 8 && corner[3] == 255,
+            "the corner is {corner:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -3970,9 +3976,6 @@ mod tests {
             cfg!(target_os = "linux"),
             "{NO_RENDERER}"
         );
-        if cfg!(any(target_os = "android", target_os = "ios")) {
-            assert!(NO_RENDERER.contains("GPU could not be used"));
-        }
     }
 
     /// Two clips cut at 4 s on one track, the incoming one with two

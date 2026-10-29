@@ -1,0 +1,27 @@
+# A style: what a new project made with it starts as. The folder's
+# CLAUDE.md is copied into the project, where the agent reads it.
+
+name = "Lo-fi loop"
+name_th = "ลูปชิล lo-fi"
+description = "A cosy scene that loops without a seam: rain, steam, light and a song. For music, study and sleep."
+description_th = "ฉากอบอุ่นที่วนได้ไม่มีรอยต่อ ฝนตก ไอน้ำ แสงไฟ และเพลง สำหรับฟังเพลง อ่านหนังสือ และนอน"
+aspect = "9:16"
+
+[[starters]]
+label = "New loop scene"
+label_th = "ฉากลูปใหม่"
+prompt = "Make a new loop scene: "
+prompt_th = "ทำฉากลูปใหม่: "
+fill = true
+
+[[starters]]
+label = "Loop with my song"
+label_th = "ลูปกับเพลงของฉัน"
+prompt = "Make a loop scene for the song in assets/ and lay the song under it."
+prompt_th = "ทำฉากลูปสำหรับเพลงใน assets/ แล้ววางเพลงไว้ใต้ฉาก"
+
+[[starters]]
+label = "Put me in the scene"
+label_th = "ใส่ตัวฉันในฉาก"
+prompt = "Add the character from characters/ to the active scene, doing something calm that fits it."
+prompt_th = "ใส่ตัวละครจาก characters/ ลงในฉากที่เปิดอยู่ ทำอะไรสบายๆ ที่เข้ากับฉาก"

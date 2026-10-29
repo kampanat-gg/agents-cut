@@ -1,0 +1,27 @@
+# A style: what a new project made with it starts as. The folder's
+# CLAUDE.md is copied into the project, where the agent reads it.
+
+name = "Mystery case file"
+name_th = "แฟ้มคดีปริศนา"
+description = "Unsolved mysteries and strange cases on a dark evidence board: polaroids, red string, typed notes."
+description_th = "เรื่องลึกลับและคดีปริศนา บนบอร์ดหลักฐานโทนมืด รูปโพลารอยด์ เส้นด้ายแดง และโน้ตพิมพ์ดีด"
+aspect = "9:16"
+
+[[starters]]
+label = "New case"
+label_th = "เปิดคดีใหม่"
+prompt = "Make a new episode about this case or mystery: "
+prompt_th = "ทำตอนใหม่เกี่ยวกับคดีหรือเรื่องลึกลับ: "
+fill = true
+
+[[starters]]
+label = "Write 5 hooks"
+label_th = "คิด hook 5 แบบ"
+prompt = "Write 5 hook options for the episode on the active timeline. Do not edit anything yet."
+prompt_th = "คิด hook 5 แบบสำหรับตอนใน timeline ที่เปิดอยู่ ยังไม่ต้องแก้อะไร"
+
+[[starters]]
+label = "Make the evidence board"
+label_th = "ทำบอร์ดหลักฐาน"
+prompt = "Make this style's evidence board backdrop and lay it under the whole active timeline."
+prompt_th = "ทำบอร์ดหลักฐานของสไตล์นี้ แล้ววางใต้ทั้ง timeline ที่เปิดอยู่"

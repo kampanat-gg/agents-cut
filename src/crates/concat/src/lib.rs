@@ -8,9 +8,8 @@
 //! in [`studio`]. The state reads the engine's project and writes commands
 //! to it; nothing here decides what an edit means.
 //!
-//! A library so that every entry point is a few lines: `main.rs` on the
-//! desktop and on iOS, and the `concat-android` activity on Android. Each
-//! one calls [`run`].
+//! A library so that the entry point, `main.rs`, is a few lines: it calls
+//! [`run`].
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -31,46 +30,36 @@ mod ui {
     slint::include_modules!();
 }
 
+mod agent;
 mod batch_volume;
 mod chips;
 mod dock;
+mod episodes;
+mod files;
 mod fonts;
 mod format;
 mod gpu;
 mod grading;
 mod host;
 mod i18n;
-/// The iPhone's pickers and its way to Photos; see the module.
-#[cfg(target_os = "ios")]
-mod ios;
 mod keymap;
 mod meters;
-mod platform;
-/// What a phone's own crate installs before the window runs: the way to
-/// the system's file picker, and where a finished export is put so the
-/// phone shows it. See `platform::pick_files_async` and
-/// `platform::publish_export`.
-#[cfg(any(target_os = "android", target_os = "ios"))]
-pub use platform::{
-    ExportPublisher, FilePicker, PickKinds, install_export_publisher, install_file_picker,
-};
-#[cfg(target_os = "android")]
-pub use platform::{LinkOpener, install_link_opener};
-#[cfg(any(target_os = "android", target_os = "ios"))]
-pub use platform::{MicrophoneAccess, install_microphone_access};
 mod panes;
+mod platform;
 mod prefs;
 mod presets;
 mod source;
 mod speed_ramp;
 mod studio;
+mod styles;
 mod sysinfo;
+mod voice;
 /// Native Wayland file drops, which winit does not report; see the module.
 #[cfg(target_os = "linux")]
 mod wayland_drop;
 /// Elsewhere the listener is a name that starts nothing, so platform.rs
 /// reads the same on every desktop.
-#[cfg(not(any(target_os = "linux", target_os = "android")))]
+#[cfg(not(target_os = "linux"))]
 mod wayland_drop {
     /// Nothing to listen to: no desktop but Linux draws through Wayland.
     pub struct Listener;
@@ -198,8 +187,6 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     // What Import and a finished export reach on an iPhone. Android's own
     // crate installs its; iOS runs this crate's binary, so it is here.
     // https://github.com/jub0t/Concat/issues/332
-    #[cfg(target_os = "ios")]
-    ios::install();
 
     // The interface scale: a percent of the display's own, applied once
     // the window is up and kept through moves between monitors; see
@@ -317,30 +304,16 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     fonts::register();
     let app = App::new()?;
     app.set_macos(platform::MACOS);
-    // A phone wears the phone shell - see ui/phone/ - and its lanes keep
-    // the playhead at their middle; the strip and the dock are the desk's.
-    let phone = platform::phone();
-    app.set_phone(phone);
-    // The launch screen's version line, and whether its drop zone is
-    // offered: a drag in from the system is a desk's (see platform.rs).
+    // The launch screen's version line.
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
-    app.set_can_drop(cfg!(not(any(target_os = "android", target_os = "ios"))));
 
     // The user's own packages - imported looks, and any effect folder they
     // or the community wrote - sit beside the built-ins from the first
     // frame. One that will not load is skipped, and its reason is the
     // first thing the window says.
     let mut studio = Studio::new(host);
-    studio.set_phone(phone);
     if safe {
-        // Each key in a call of its own: scripts/locales.py finds a key by
-        // the literal inside `t(...)`, and one held in a variable is lost.
-        let notice = if cfg!(target_os = "android") {
-            i18n::t("start.safeModePhone")
-        } else {
-            i18n::t("start.safeMode")
-        };
-        studio.notify(&notice, false);
+        studio.notify(&i18n::t("start.safeMode"), false);
     }
     studio.reload_packages(false);
     studio.watch_packages();
@@ -401,6 +374,14 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         || concat_text::Fonts::new().families(),
         |studio, _, _, families| studio.system_fonts_known(families),
     );
+
+    // What of the on-device AI this build carries, for the panes to hide
+    // what it does not; see build.slint. Fixed for the life of the binary.
+    {
+        let build = app.global::<Build>();
+        build.set_speech_ai(cfg!(feature = "speech"));
+        build.set_vision_ai(cfg!(feature = "vision-ai"));
+    }
 
     // Handed over once, here, and never replaced: a fresh model is a reset,
     // and a reset rebuilds every row that hangs off it.
@@ -475,7 +456,6 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         editor.set_seats(ModelRc::from(models.seats.clone()));
         editor.set_dividers(ModelRc::from(models.dividers.clone()));
         app.set_recents(ModelRc::from(models.recents.clone()));
-        editor.set_text_presets(ModelRc::from(models.text_presets.clone()));
         editor.set_style_presets(ModelRc::from(models.style_presets.clone()));
         editor.set_language_presets(ModelRc::from(models.language_presets.clone()));
         editor.set_font_families(ModelRc::from(models.font_families.clone()));
@@ -694,6 +674,135 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
 
     let editor = app.global::<Editor>();
 
+    // ── the agent's sidebar ──
+    agent::discover_servers();
+    {
+        let agent = app.global::<ui::Agent>();
+        agent.set_rows(ModelRc::from(shell.studio.borrow().agent.rows()));
+        agent.set_starters(ModelRc::from(shell.studio.borrow().agent.starters()));
+        agent.on_send(on_window!(|state, text: SharedString| {
+            agent::send(&mut state, text.to_string());
+        }));
+        agent.on_cancel(on_window!(|state| {
+            state.agent.cancel();
+        }));
+        agent.on_new_chat(on_window!(|state| {
+            state.agent.new_chat();
+        }));
+        {
+            let (models, efforts) = agent::Chat::choices();
+            agent.set_models(ModelRc::from(Rc::new(VecModel::from(models))));
+            agent.set_efforts(ModelRc::from(Rc::new(VecModel::from(efforts))));
+            let mut studio = shell.studio.borrow_mut();
+            let (model, effort) = (
+                studio.prefs.agent_model.clone(),
+                studio.prefs.agent_effort.clone(),
+            );
+            studio.agent.remember(model.as_deref(), effort.as_deref());
+        }
+        agent.on_model_picked(on_window!(|state, index: i32| {
+            state.prefs.agent_model = state.agent.choose_model(index.max(0) as usize);
+            state.prefs.save(&state.host.dirs);
+        }));
+        agent.on_effort_picked(on_window!(|state, index: i32| {
+            state.prefs.agent_effort = state.agent.choose_effort(index.max(0) as usize);
+            state.prefs.save(&state.host.dirs);
+        }));
+        // The picker runs on a turn of its own, with nothing borrowed; see
+        // `host::after_dialog`.
+        agent.on_attach(|| {
+            host::pick_files_then(i18n::t("agent.attach"), None, |studio, app, _, files| {
+                agent::attach(studio, files);
+                studio.agent.publish(app);
+            });
+        });
+        agent.set_voices(ModelRc::from(shell.studio.borrow().agent.voices()));
+        agent.set_threads(ModelRc::from(shell.studio.borrow().agent.threads()));
+        // An episode's conversation, or the channel's; not while a turn
+        // runs, whose words would land in the wrong one.
+        agent.on_thread_picked(on_window!(
+            |state, key: SharedString, title: SharedString| {
+                if !state.agent.switch_thread(key.as_str(), title.as_str()) {
+                    state.notify(&i18n::t("agent.busySwitch"), false);
+                }
+            }
+        ));
+        agent.on_voice_chosen(on_window!(|state, id: SharedString, name: SharedString| {
+            if let Err(error) = state.agent.choose_voice(id.as_str(), name.as_str()) {
+                state.notify(&error, true);
+            }
+        }));
+        // The voices are the agent's to find, signed in as the user is.
+        agent.on_voices_asked(on_window!(|state| {
+            agent::send(&mut state, i18n::t("agent.voicesPrompt"));
+        }));
+        agent.on_mention(on_window!(|state, words: SharedString| {
+            state.agent.mention(words.as_str());
+        }));
+        agent.on_toggle_steps(on_window!(|state, row: i32| {
+            state.agent.toggle(row.max(0) as usize);
+        }));
+        agent.on_shown_changed(on_window!(|state, shown: bool| {
+            state.agent.set_shown(shown);
+        }));
+    }
+
+    // ── the Files pane ──
+    {
+        let files = app.global::<ui::Files>();
+        files.set_rows(ModelRc::from(shell.studio.borrow().files.rows()));
+        files.set_videos(ModelRc::from(shell.studio.borrow().files.videos()));
+        files.set_beats(ModelRc::from(shell.studio.borrow().files.beats()));
+        files.on_storyboard_opened(on_window!(|state, folder: SharedString| {
+            state.files.open_storyboard(folder.as_str());
+        }));
+        files.on_storyboard_closed(on_window!(|state| {
+            state.files.close_storyboard();
+        }));
+        files.on_new_video(on_window!(|state| {
+            state.new_video();
+        }));
+        files.on_toggle(on_window!(|state, path: SharedString| {
+            state.files.toggle(path.as_str());
+        }));
+        // A double-click lays a picture, a video or a sound at the
+        // playhead, and opens anything else where the system would.
+        files.on_activate(on_window!(|state, path: SharedString| {
+            if files::Kind::of(std::path::Path::new(path.as_str())).placeable() {
+                state.place_at_playhead(&format!("file:{path}"));
+            } else {
+                files::open(&mut state, path.as_str());
+            }
+        }));
+        files.on_action(on_window!(
+            |state, path: SharedString, action: SharedString| {
+                match action.as_str() {
+                    "add" => state.place_at_playhead(&format!("file:{path}")),
+                    "mention" => state.agent.mention(&format!("@{path}")),
+                    "open" => files::open(&mut state, path.as_str()),
+                    "open-code" => {
+                        if let Some(full) = state.files.full(path.as_str())
+                            && let Err(error) = platform::open_as_text(&full.to_string_lossy())
+                        {
+                            state.notify(&error, true);
+                        }
+                    }
+                    "reveal" => {
+                        if let Some(full) = state.files.full(path.as_str())
+                            && let Err(error) = platform::reveal(&full.to_string_lossy())
+                        {
+                            state.notify(&error, true);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        ));
+        files.on_open_folder(on_window!(|state| {
+            files::open(&mut state, "");
+        }));
+    }
+
     // ── the launch screen ──
     app.on_start_compose(on_window!(|state| {
         state.handle(Msg::Start(StartMsg::Compose));
@@ -706,6 +815,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     }));
     app.on_start_location_edited(on_window!(|state, path: SharedString| {
         state.handle(Msg::Start(StartMsg::LocationEdited(path.to_string())));
+    }));
+    app.on_start_style_changed(on_window!(|state, index: i32| {
+        state.handle(Msg::Start(StartMsg::StyleChanged(index)));
     }));
     app.on_start_aspect_changed(on_window!(|state, index: i32| {
         state.handle(Msg::Start(StartMsg::AspectChanged(index)));
@@ -817,7 +929,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     // Not on a phone or in the compact dock: there the two seats are the
     // monitor and the timeline, and a third would squeeze both.
     editor.on_key_mark_opened(on_dock!(|state| {
-        if !state.compact && !state.meters.phone && !state.dock.contains(PaneKind::Keyframes) {
+        if !state.compact && !state.dock.contains(PaneKind::Keyframes) {
             add_pane(&mut state, PaneKind::Keyframes);
         }
     }));
@@ -933,12 +1045,6 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     editor.on_media_activate(on_window!(|state, id: i32| {
         state.place_at_playhead(&format!("media:{id}"));
     }));
-    editor.on_media_add_picked(on_window!(|state, at_end: bool| {
-        state.handle(Msg::Media(MediaMsg::AddPicked { at_end }));
-    }));
-    editor.on_media_clear_picks(on_window!(|state| {
-        state.handle(Msg::Media(MediaMsg::ClearPicks));
-    }));
     editor.on_library_add_text(on_window!(|state, preset: SharedString| {
         state.place_at_playhead(&format!("text:{preset}:Title"));
     }));
@@ -1007,6 +1113,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         };
         state.selection.clear();
         state.apply(concat_project::Command::SelectTimeline { timeline_id: id });
+        state.follow_video();
     }));
     editor.on_tab_renamed(on_window!(|state, index: i32, name: SharedString| {
         let trimmed = name.trim().to_string();
@@ -1111,12 +1218,6 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     }));
     editor.on_scrubbed(on_lanes!(|state, seconds: f32| {
         state.scrub(seconds);
-    }));
-    editor.on_finger_held(on_lanes!(|state| {
-        state.finger_held();
-    }));
-    editor.on_finger_lifted(on_lanes!(|state| {
-        state.finger_lifted();
     }));
     editor.on_scrolled(on_lanes!(|state, seconds: f32| {
         state.handle(Msg::Timeline(TimelineMsg::Scrolled(seconds)));
@@ -1431,12 +1532,10 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
 
     // ── the monitor ──
     editor.on_seek(on_lanes!(|state, seconds: f32| {
-        state.stop_glide();
         state.pause();
         state.seek(seconds);
     }));
     editor.on_step_frames(on_lanes!(|state, frames: f32| {
-        state.stop_glide();
         state.pause();
         let fps = state.frame_rate().round().max(1.0);
         let at = (state.playhead * fps).round() + frames;
@@ -2572,7 +2671,9 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
         // fails at its first transcription, so the smoke run loads them.
         // Not elsewhere: there they are linked in, and asking ggml for its
         // devices would only bring Metal up on a Mac runner for nothing.
+        // Nor in a build without whisper, which has no kernels to load.
         #[cfg(all(
+            feature = "speech",
             target_arch = "x86_64",
             any(target_os = "windows", target_os = "linux")
         ))]
@@ -2637,15 +2738,6 @@ fn start(project: Option<std::path::PathBuf>, smoke: bool) -> Result<(), slint::
     // first, and the process then left without a save: the edits since the
     // last autosave were lost and the project's lock was left behind. A
     // desktop's every way out closes the project before the loop ends.
-    #[cfg(target_os = "android")]
-    Shell::with(|shell, _| {
-        let mut studio = shell.studio.borrow_mut();
-        if studio.session.is_some()
-            && let Err(error) = studio.close_project()
-        {
-            log::warn!("close: the activity ended and the project could not be saved: {error}");
-        }
-    });
     stop_exports();
     drop(startup_mark);
     leave(0);
@@ -2755,7 +2847,7 @@ const SAFE_AFTER: std::time::Duration = std::time::Duration::from_secs(15);
 /// launch, and the backend's fall back to OpenGL ES only catches a surface
 /// that fails to open (#507). A Mac has neither.
 fn safe_start() -> (Option<concat_host::jobs::Tripwire>, bool) {
-    if !cfg!(any(windows, target_os = "linux", target_os = "android")) {
+    if !cfg!(any(windows, target_os = "linux")) {
         return (None, false);
     }
     let Ok(dirs) = concat_host::AppDirs::locate() else {
@@ -2912,8 +3004,16 @@ mod tests {
     #[test]
     fn a_failed_save_keeps_the_real_session_and_its_edit() {
         let scratch = Scratch::new("session");
-        let info = projects::create(&scratch.location(), "Closing", 1920, 1080, 30, 1, [0, 0, 0, 255])
-            .expect("creates the project");
+        let info = projects::create(
+            &scratch.location(),
+            "Closing",
+            1920,
+            1080,
+            30,
+            1,
+            [0, 0, 0, 255],
+        )
+        .expect("creates the project");
         let manifest = projects::manifest_path(Path::new(&info.path));
 
         // A real session, saved once; then an edit that lives in memory
@@ -2990,8 +3090,16 @@ mod tests {
     #[test]
     fn a_delayed_autosave_cannot_replace_the_close_snapshot() {
         let scratch = Scratch::new("ordered-close");
-        let info = projects::create(&scratch.location(), "Ordered", 1920, 1080, 30, 1, [0, 0, 0, 255])
-            .expect("creates the project");
+        let info = projects::create(
+            &scratch.location(),
+            "Ordered",
+            1920,
+            1080,
+            30,
+            1,
+            [0, 0, 0, 255],
+        )
+        .expect("creates the project");
         let mut session = Session::open_info(&info).expect("opens the session");
         let (old_path, old_document) = session.prepare_save(None);
         let old_ticket = projects::ticket();

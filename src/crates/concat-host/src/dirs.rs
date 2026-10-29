@@ -47,7 +47,7 @@ impl AppDirs {
         }
         let convention = convention(std::env::consts::OS);
         if convention == Convention::Apple {
-            let dirs = apple(&home()?, cfg!(target_os = "ios"));
+            let dirs = apple(&home()?, false);
             adopt(&dirs.config);
             adopt(&dirs.data);
             Ok(dirs)
@@ -100,16 +100,9 @@ impl AppDirs {
     }
 
     /// Where what the user made and cannot download again is kept - the
-    /// Audio page's own sounds, the voices they cloned: `data` everywhere
-    /// but an iPhone, whose `data` is `Caches`, which the phone may empty
-    /// when it runs short of space and does not back up. There it is
-    /// `config`, `Application Support`, which it keeps.
+    /// Audio page's own sounds, the voices they cloned: `data`.
     pub fn library(&self) -> PathBuf {
-        if cfg!(target_os = "ios") {
-            self.config.clone()
-        } else {
-            self.data.clone()
-        }
+        self.data.clone()
     }
 }
 
@@ -203,7 +196,9 @@ fn link(target: &Path, at: &Path) -> std::io::Result<()> {
     if status.success() {
         Ok(())
     } else {
-        Err(std::io::Error::other(format!("mklink /J answered {status}")))
+        Err(std::io::Error::other(format!(
+            "mklink /J answered {status}"
+        )))
     }
 }
 

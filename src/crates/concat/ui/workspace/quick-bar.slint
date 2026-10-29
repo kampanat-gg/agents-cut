@@ -1,0 +1,369 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jareer Abdullah and Concat contributors
+
+// The bar that floats over what is picked on the stage: the few changes a
+// title or a picture most often wants, where the eye already is, so the
+// inspector need not hold a column of the window open. A title gets its
+// face, size, weight, slant, alignment and colour; a picture its
+// opacity, its flips and removal. Both get the way to the agent - the
+// clip named in the box, for a change words say better than knobs - and
+// the way to everything else, the inspector.
+//
+// Every control writes through the inspector's own two calls, a field and
+// a commit, so an edit here is the same undoable step as one there.
+
+import { I18n } from "../i18n.slint";
+import { Theme } from "../theme/theme.slint";
+import { Glyph, Icon } from "../icons.slint";
+import { Tip } from "../primitives/tooltip.slint";
+import { Agent } from "../agent.slint";
+import { Editor } from "../editor.slint";
+import { FontPicker } from "../inspector/font-picker.slint";
+import { ClipField, ClipKind, ClipTextField, TextAlignment } from "../timeline/model.slint";
+import { PaneKind } from "pane-switcher.slint";
+
+/// One square button of the bar.
+component BarButton inherits Rectangle {
+    in property <Glyph> glyph;
+    in property <string> word;
+    in property <string> tip;
+    in property <bool> on;
+    in property <bool> bold;
+    in property <bool> slanted;
+    callback clicked();
+
+    width: root.word != "" ? Math.max(28px, label.preferred-width + 14px) : 28px;
+    height: 28px;
+    border-radius: 7px;
+    background: root.on ? Theme.field-active
+        : touch.has-hover ? Theme.field-hover : transparent;
+
+    if root.word == "": Icon {
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        glyph: root.glyph;
+        size: 14px;
+        tint: root.on ? Theme.fg : Theme.fg-muted;
+    }
+    label := Text {
+        visible: root.word != "";
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        text: root.word;
+        color: root.on ? Theme.fg : Theme.fg-muted;
+        font-size: Theme.fs;
+        font-weight: root.bold ? 700 : Theme.weight-title;
+        font-italic: root.slanted;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    Tip {
+        text: root.tip;
+        active: touch.has-hover && root.tip != "";
+    }
+}
+
+component Divider inherits Rectangle {
+    width: 1px;
+    height: 18px;
+    background: Theme.line;
+}
+
+/// The colours a title is most often set in, a click away; the
+/// inspector's picker has the rest.
+component Swatch inherits Rectangle {
+    in property <color> colour;
+    in property <bool> current;
+    callback picked();
+
+    width: 22px;
+    height: 22px;
+    border-radius: 11px;
+    background: root.colour;
+    border-width: root.current ? 2px : 1px;
+    border-color: root.current ? Theme.accent : Theme.line-strong;
+
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.picked(); }
+    }
+}
+
+export component QuickBar inherits Rectangle {
+    /// The stage's box in the bar's parent, and the picked clip's box in
+    /// fractions of it: where the bar goes.
+    in property <length> stage-x;
+    in property <length> stage-y;
+    in property <length> stage-w;
+    in property <length> stage-h;
+    in property <float> cx;
+    in property <float> cy;
+    in property <float> w;
+    in property <float> h;
+    /// The room the bar may use: its parent's size.
+    in property <length> room-w;
+    in property <length> room-h;
+
+    property <bool> title: Editor.selected-clip.kind == ClipKind.text;
+    property <length> top: root.stage-y + (root.cy - root.h / 2) * root.stage-h;
+    property <length> bottom: root.stage-y + (root.cy + root.h / 2) * root.stage-h;
+    property <length> centre: root.stage-x + root.cx * root.stage-w;
+
+    // Over the clip, or under it when there is no room over it.
+    x: Math.max(4px, Math.min(root.room-w - self.width - 4px, root.centre - self.width / 2));
+    y: root.top - self.height - 10px >= 4px
+        ? root.top - self.height - 10px
+        : Math.min(root.room-h - self.height - 4px, root.bottom + 10px);
+    width: row.preferred-width;
+    height: 40px;
+    border-radius: 12px;
+    background: Theme.raised;
+    border-width: 1px;
+    border-color: Theme.line-strong;
+    drop-shadow-blur: 14px;
+    drop-shadow-offset-y: 4px;
+    drop-shadow-color: #00000055;
+
+    function set(field: ClipField, value: float) {
+        Editor.clip-set(field, value);
+        Editor.clip-commit();
+    }
+
+    // A press on the bar's own ground stays here, not on the stage under it.
+    TouchArea {}
+
+    row := HorizontalLayout {
+        padding-left: 6px;
+        padding-right: 6px;
+        spacing: 2px;
+        alignment: start;
+
+        // ── a title's ──
+        if root.title: VerticalLayout {
+            alignment: center;
+            FontPicker {
+                width: 150px;
+                horizontal-stretch: 0;
+                family: Editor.selected-clip.font-family;
+                missing: Editor.selected-clip.font-missing;
+                picked(family) => {
+                    Editor.clip-set-text(ClipTextField.font-family, family);
+                    Editor.clip-commit();
+                }
+            }
+        }
+        if root.title: Rectangle { width: 4px; }
+        if root.title: VerticalLayout {
+            alignment: center;
+            BarButton {
+                glyph: Glyph.minus;
+                tip: I18n.t("quickBar.smaller");
+                clicked => {
+                    root.set(ClipField.font-size,
+                        Math.max(0.01, Editor.selected-clip.font-size - 0.005));
+                }
+            }
+        }
+        if root.title: Text {
+            width: 40px;
+            text: "\{Math.round(Editor.selected-clip.font-size * 1000) / 10}%";
+            color: Theme.fg;
+            font-size: Theme.fs-sm;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        if root.title: VerticalLayout {
+            alignment: center;
+            BarButton {
+                glyph: Glyph.plus;
+                tip: I18n.t("quickBar.larger");
+                clicked => {
+                    root.set(ClipField.font-size,
+                        Math.min(0.5, Editor.selected-clip.font-size + 0.005));
+                }
+            }
+        }
+        if root.title: VerticalLayout {
+            alignment: center;
+            padding-left: 4px;
+            padding-right: 4px;
+            Divider {}
+        }
+        if root.title: VerticalLayout {
+            alignment: center;
+            BarButton {
+                word: "B";
+                bold: true;
+                on: Editor.selected-clip.font-weight >= 700;
+                tip: I18n.t("quickBar.bold");
+                clicked => {
+                    root.set(ClipField.font-weight,
+                        Editor.selected-clip.font-weight >= 700 ? 400 : 700);
+                }
+            }
+        }
+        if root.title: VerticalLayout {
+            alignment: center;
+            BarButton {
+                word: "I";
+                slanted: true;
+                on: Editor.selected-clip.italic;
+                tip: I18n.t("quickBar.italic");
+                clicked => { root.set(ClipField.italic, Editor.selected-clip.italic ? 0 : 1); }
+            }
+        }
+        // Left, centre, right, and round again.
+        if root.title: VerticalLayout {
+            alignment: center;
+            BarButton {
+                glyph: Editor.selected-clip.align == TextAlignment.left ? Glyph.align-left
+                    : Editor.selected-clip.align == TextAlignment.right ? Glyph.align-right
+                    : Glyph.align-center-x;
+                tip: I18n.t("quickBar.align");
+                clicked => {
+                    root.set(ClipField.align,
+                        Editor.selected-clip.align == TextAlignment.left ? 1
+                        : Editor.selected-clip.align == TextAlignment.center ? 2 : 0);
+                }
+            }
+        }
+        if root.title: VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 28px;
+                height: 28px;
+                border-radius: 7px;
+                background: colour-touch.has-hover ? Theme.field-hover : transparent;
+
+                Rectangle {
+                    x: 6px;
+                    y: 6px;
+                    width: 16px;
+                    height: 16px;
+                    border-radius: 8px;
+                    background: Editor.selected-clip.fill;
+                    border-width: 1px;
+                    border-color: Theme.line-strong;
+                }
+                colour-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { colours.show(); }
+                }
+                colours := PopupWindow {
+                    x: (parent.width - 6 * 22px - 5 * 6px - 16px) / 2;
+                    y: parent.height + 8px;
+                    close-policy: close-on-click-outside;
+
+                    Rectangle {
+                        background: Theme.raised;
+                        border-width: 1px;
+                        border-color: Theme.line-strong;
+                        border-radius: 10px;
+
+                        HorizontalLayout {
+                            padding: 8px;
+                            spacing: 6px;
+                            for swatch in [#ffffff, #141413, #d97757, #ffd23f, #ff4d4d, #4dd2ff]: Swatch {
+                                colour: swatch;
+                                current: Editor.selected-clip.fill == swatch;
+                                picked => {
+                                    Editor.clip-set-colour(ClipTextField.color, swatch);
+                                    Editor.clip-commit();
+                                    colours.close();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ── a picture's ──
+        if !root.title: VerticalLayout {
+            alignment: center;
+            BarButton {
+                glyph: Glyph.minus;
+                tip: I18n.t("quickBar.fainter");
+                clicked => { root.set(ClipField.opacity, Math.max(0, Editor.selected-clip.opacity - 0.1)); }
+            }
+        }
+        if !root.title: Text {
+            width: 44px;
+            text: "\{Math.round(Editor.selected-clip.opacity * 100)}%";
+            color: Theme.fg;
+            font-size: Theme.fs-sm;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        if !root.title: VerticalLayout {
+            alignment: center;
+            BarButton {
+                glyph: Glyph.plus;
+                tip: I18n.t("quickBar.stronger");
+                clicked => { root.set(ClipField.opacity, Math.min(1, Editor.selected-clip.opacity + 0.1)); }
+            }
+        }
+        if !root.title: VerticalLayout {
+            alignment: center;
+            padding-left: 4px;
+            padding-right: 4px;
+            Divider {}
+        }
+        if !root.title: VerticalLayout {
+            alignment: center;
+            BarButton {
+                glyph: Glyph.flip-h;
+                on: Editor.selected-clip.flip-h;
+                tip: I18n.t("quickBar.flipH");
+                clicked => { root.set(ClipField.flip-h, Editor.selected-clip.flip-h ? 0 : 1); }
+            }
+        }
+        if !root.title: VerticalLayout {
+            alignment: center;
+            BarButton {
+                glyph: Glyph.flip-v;
+                on: Editor.selected-clip.flip-v;
+                tip: I18n.t("quickBar.flipV");
+                clicked => { root.set(ClipField.flip-v, Editor.selected-clip.flip-v ? 0 : 1); }
+            }
+        }
+        if !root.title: VerticalLayout {
+            alignment: center;
+            BarButton {
+                glyph: Glyph.trash;
+                tip: I18n.t("common.delete");
+                clicked => { Editor.delete-selected(); }
+            }
+        }
+
+        // ── both ──
+        VerticalLayout {
+            alignment: center;
+            padding-left: 4px;
+            padding-right: 4px;
+            Divider {}
+        }
+        // The clip, named in the agent's box, for the change to be said.
+        VerticalLayout {
+            alignment: center;
+            BarButton {
+                glyph: Glyph.sparkle;
+                word: I18n.t("quickBar.ask");
+                tip: I18n.t("quickBar.askTip");
+                clicked => { Agent.mention("\"" + Editor.selected-clip.name + "\""); }
+            }
+        }
+        // Everything else the clip has, in the inspector.
+        VerticalLayout {
+            alignment: center;
+            BarButton {
+                glyph: Glyph.more;
+                tip: I18n.t("quickBar.more");
+                clicked => { Editor.dock-add(PaneKind.inspector); }
+            }
+        }
+    }
+}

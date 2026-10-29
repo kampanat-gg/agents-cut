@@ -45,8 +45,8 @@ export component ColSplitter inherits Rectangle {
     // A little wider than the gutter it sits in. Two more pixels a side costs
     // the panes nothing they use and turns an 8px target into a 12px one.
     touch := TouchArea {
-        x: -2px;
-        width: root.width + 4px;
+        x: -4px;
+        width: root.width + 8px;
         mouse-cursor: ew-resize;
 
         pointer-event(event) => {
@@ -80,8 +80,8 @@ export component RowSplitter inherits Rectangle {
     }
 
     touch := TouchArea {
-        y: -2px;
-        height: root.height + 4px;
+        y: -4px;
+        height: root.height + 8px;
         mouse-cursor: ns-resize;
 
         pointer-event(event) => {

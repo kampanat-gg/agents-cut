@@ -29,12 +29,12 @@ pub struct Preferences {
     /// The parent folder of the last project created successfully.
     pub last_project_location: Option<String>,
     /// The accent, by the lower-cased name the theme lists it under —
-    /// "lime", "sky", ... — or as "#rrggbb" for a colour picked by hand.
+    /// "blue", "clay", ... — or as "#rrggbb" for a colour picked by hand.
     /// `None`, or a name no longer on the list, is the first one, which is
-    /// Lime.
+    /// Blue.
     pub accent: Option<String>,
     /// The playhead's colour as "#rrggbb", when one was picked by hand in
-    /// Settings > Appearance. `None` is the palette's own, which is lime.
+    /// Settings > Appearance. `None` is the palette's own, which is blue.
     pub playhead: Option<String>,
     /// The interface scale, as a percent from [`UI_SCALES`]: the window and
     /// everything in it are drawn this much larger than the display's own
@@ -121,6 +121,10 @@ pub struct Preferences {
     /// The Concat API on a socket while the window is open.
     #[serde(default)]
     pub server: ServerPrefs,
+    /// The model and effort the sidebar's agent runs at, as `claude`
+    /// names them ("opus", "high"); absent is Claude Code's own default.
+    pub agent_model: Option<String>,
+    pub agent_effort: Option<String>,
     /// The look new titles start from and generated captions are set in,
     /// kept from a title by the Text panel's "Use for new titles"; its
     /// words are empty. None starts titles in the bundled face.
@@ -229,8 +233,6 @@ impl Preferences {
 
     /// The multiplier the window backend takes for a percent: the percent
     /// over a hundred, which is what `SLINT_SCALE_FACTOR` parses.
-    // A phone sets its size the system's way and never scales by this.
-    #[cfg_attr(target_os = "android", allow(dead_code))]
     pub fn scale_factor(percent: u32) -> f64 {
         f64::from(percent) / 100.0
     }
@@ -272,15 +274,10 @@ impl Preferences {
             .filter(|location| std::path::Path::new(location).is_dir())
     }
 
-    /// Whether the magnet shows as on. On a phone, until the person says
-    /// otherwise: the phone editors close the gap a delete leaves on the
-    /// main picture's lane, a Split and Delete there left a black hole in
-    /// the picture and the export (#497), and the phone shell has no magnet
-    /// in sight to turn on. What that default closes is
-    /// `Studio::closes_gap`'s to say; the field alone is the desk's magnet,
-    /// which closes every lane.
+    /// Whether the magnet shows as on. What it closes is
+    /// `Studio::closes_gap`'s to say.
     pub fn magnetic(&self) -> bool {
-        self.magnetic || (crate::platform::phone() && !self.magnetic_chosen)
+        self.magnetic
     }
 
     /// Sets the magnetic timeline by the person's choice.
@@ -403,9 +400,8 @@ fn write_private(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
 mod tests {
     use super::*;
 
-    /// A choice made is kept, whatever the platform's default: a phone
-    /// that turned the magnet off stays off, and a desk that turned it on
-    /// stays on.
+    /// A choice made is kept, and a file saved before the choice was
+    /// recorded reads as unchosen and off.
     #[test]
     fn a_chosen_magnetic_timeline_outranks_the_default() {
         let mut prefs = Preferences::default();
@@ -417,7 +413,7 @@ mod tests {
         // A file saved before the choice was recorded reads as unchosen.
         let old: Preferences = serde_json::from_str(r#"{"magnetic":false}"#).expect("old prefs");
         assert!(!old.magnetic_chosen);
-        assert_eq!(old.magnetic(), crate::platform::phone());
+        assert!(!old.magnetic());
     }
 
     /// One value of the wrong shape costs that value, not every setting,

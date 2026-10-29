@@ -7,10 +7,7 @@
 # then how to download each bundle and the checksum file.
 #
 # "Before you install" says what the pipeline could not vouch for, so a
-# release never reads as more checked than it was. The caller says which:
-# WINDOWS_SIGNED=false when no certificate signed the Windows bundles, and
-# ANDROID_STARTED=false when no launch check got as far as the APK's own
-# code.
+# release never reads as more checked than it was.
 #
 # What changed is the subjects of the commits between the two refs,
 # filtered as follows.
@@ -82,12 +79,6 @@ if [ -n "$changes" ]; then
   echo
 fi
 caveats=()
-if [ "${WINDOWS_SIGNED:-true}" = false ]; then
-  caveats+=("- **Windows:** this release is not code-signed yet. SmartScreen asks before it runs: **More info** › **Run anyway**. Where Smart App Control is on, Windows refuses unsigned programs; see the [code signing policy](https://github.com/jub0t/concat/blob/main/CODE_SIGNING.md).")
-fi
-if [ "${ANDROID_STARTED:-true}" = false ]; then
-  caveats+=("- **Android:** no automated check has started this APK: CI's emulators run x86_64 and it is built for arm64. If it does not open on your phone, [say so](https://github.com/jub0t/concat/issues).")
-fi
 if [ "${#caveats[@]}" -gt 0 ]; then
   echo "### Before you install"
   echo
@@ -97,15 +88,11 @@ fi
 cat <<'MD'
 ### Download
 
-A self-contained build for every platform Concat ships on.
+A self-contained macOS build.
 
-| | Apple silicon | Intel / x86_64 | arm64 |
-|---|---|---|---|
-| macOS | `macos-arm64.dmg` | `macos-x86_64.dmg` | |
-| Windows | | `windows-x86_64-setup.exe`, `.msi` | |
-| Linux | | `linux-x86_64.deb`, `.rpm`, `x86_64.AppImage` | `linux-aarch64.deb`, `.rpm`, `aarch64.AppImage` |
-| Android | | | `android-arm64.apk` |
-| iOS / iPadOS | | | `ios-arm64.ipa` |
+| | Apple silicon | Intel |
+|---|---|---|
+| macOS | `macos-arm64.dmg` | `macos-x86_64.dmg` |
 
 `SHA256SUMS` lists each file's checksum.
 MD

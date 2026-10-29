@@ -115,7 +115,6 @@ HEAD = """<p align="center">
 
 {sysreq}
 
-**[Code signing policy](../CODE_SIGNING.md)**
 
 ## {contribute_h}
 

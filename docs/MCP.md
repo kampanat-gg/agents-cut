@@ -39,14 +39,14 @@ On Windows, write the path with doubled backslashes in JSON: `"C:\\Program Files
 
 `concat --mcp` works one of two ways, and the `concat_version` tool says which (`mcp.mode`):
 
-- **Through the window** (`window`). When Concat is open with **Settings > Automation > Scripts and apps** on, the window writes where its server is, and its token, to `automation.json` in Concat's config folder (readable only by you). The MCP server finds it and goes through the window's server. This is the safer way while you are editing: the agent cannot open the project you have on screen and save over it, and exports take turns with yours.
+- **Through the window** (`window`). When Concat is open with **Settings > Automation > Scripts and apps** on, the window writes where its server is, and its token, to `automation.json` in Concat's config folder (readable only by you). The MCP server finds it and goes through the window's server. This is the way to work alongside the agent: it edits the project you have on screen through the window (live mode, below), and exports take turns with yours.
 - **On its own** (`headless`). Otherwise the MCP server runs Concat's engine itself, with no window. Nothing has to be open. Every Concat process locks the project folders it has open (`concat.lock`, let go on close or when the process dies), so a project open in the window is refused here with a note to turn on Automation and use `--mcp window`, and the window refuses a project an agent has open.
 
 Choose explicitly with `--mcp window` (fail rather than run on its own) or `--mcp headless`; the default is `--mcp auto`. To reach a server elsewhere, set `CONCAT_API_ADDRESS` (e.g. `127.0.0.1:7420`) and `CONCAT_API_TOKEN` in the client's `env` for the server.
 
 Either way the agent writes files - projects, exports, frames - only under your home folder. Set `CONCAT_MCP_ROOTS` (a path list, `:`-separated, `;` on Windows) to allow other folders in headless mode.
 
-The agent edits projects of its own; it does not edit the project open in the window while you watch. That ("live mode") is planned in [#337](https://github.com/jub0t/Concat/issues/337).
+**Live mode.** Through the window, the project you have open is the window's: when the agent opens it, its edits run in the window as if you had made them. Each is one step of the window's undo history (Cmd-Z takes it back), the preview and timeline follow along, and the autosave writes it. Closing it from the agent leaves it open in the window, and the agent cannot rename it. Frames and exports are made from a copy of the edit as it stands. Any other project the agent opens is a session of its own, as before.
 
 ## What the agent can do
 

@@ -171,6 +171,12 @@ export enum Glyph {
     move,
     wand,
     sliders,
+    /// a file of no kind the editor knows
+    file,
+    /// the title bar's switch for the agent's sidebar
+    panel-left,
+    /// and for the side panel down the right
+    panel-right,
 }
 
 component Stroked inherits Path {
@@ -250,6 +256,25 @@ export component Icon inherits Rectangle {
         size: root.size; tint: root.tint; weight: root.weight;
         commands: "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9"
             + "A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z";
+    }
+
+    // lucide/panel-right
+    if root.glyph == Glyph.panel-right: Stroked {
+        size: root.size; tint: root.tint; weight: root.weight;
+        commands: "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2Z M15 3v18";
+    }
+
+    // lucide/panel-left
+    if root.glyph == Glyph.panel-left: Stroked {
+        size: root.size; tint: root.tint; weight: root.weight;
+        commands: "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1 -2 2h-14a2 2 0 0 1 -2 -2v-14a2 2 0 0 1 2 -2Z M9 3v18";
+    }
+
+    // lucide/file
+    if root.glyph == Glyph.file: Stroked {
+        size: root.size; tint: root.tint; weight: root.weight;
+        commands: "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"
+            + " M14 2v4a2 2 0 0 0 2 2h4";
     }
 
     // lucide/book-open

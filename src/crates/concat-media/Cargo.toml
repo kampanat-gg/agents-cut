@@ -8,6 +8,8 @@ description = "Getting pixels and samples in and out of media files. The only cr
 
 [dependencies]
 concat-core.workspace = true
+# The faces titles are set in, for SVGs to name too; see svg.rs.
+concat-text.workspace = true
 # Linked FFmpeg: the safe wrapper over libavformat, libavcodec, libavfilter,
 # libswscale and libswresample. Built against the FFmpeg development
 # libraries on the machine - pkg-config where there is one, FFMPEG_DIR

@@ -23,9 +23,8 @@ export component Pane inherits Rectangle {
     background: Theme.panel;
     border-width: root.outlined ? 1px : 0px;
     border-color: Theme.line;
-    border-radius: Theme.r-lg;
-    // Rounded corners only cut the pane's own fill; the body has to be clipped
-    // to them as well or a full-bleed child squares them off again.
+    // Square: the panes meet edge to edge, a hairline apart, as one
+    // surface rather than cards on a ground.
     clip: true;
 
     VerticalLayout {

@@ -196,6 +196,7 @@ component Clip inherits Rectangle {
     /// the width it always had and stays a little wider than tall.
     property <length> chip: Math.min(root.header-h - 5px, 20px);
     property <length> chip-w: Math.max(root.chip, 14px);
+    property <length> code-w: Math.max(root.chip * 1.6, 20px);
     property <length> body-h: Math.max(0px, root.height - root.header-h);
     /// The sound band at the foot of a video clip: its file's waveform
     /// under its frames, a third of the body and never a sliver. A video
@@ -461,7 +462,8 @@ component Clip inherits Rectangle {
             x: root.text-x;
             y: 0;
             width: parent.width - root.text-x - 7px
-                - (root.item.fx && root.width > 60px ? root.chip-w + 6px : 0px);
+                - (root.item.fx && root.width > 60px ? root.chip-w + 6px : 0px)
+                - (root.item.code && root.width > 80px ? root.code-w + 6px : 0px);
             height: parent.height;
             text: root.item.name;
             color: Theme.clip-ink;
@@ -480,6 +482,30 @@ component Clip inherits Rectangle {
             fade-in: root.item.fade-in;
             fade-out: root.item.fade-out;
             px-per-second: root.px-per-second;
+        }
+
+        // A `</>` chip on a code clip, left of the `fx` one, so a picture
+        // made from code is tellable from a rendered one.
+        if root.item.code && root.width > 80px: Rectangle {
+            x: parent.width - self.width - 4px
+                - (root.item.fx && root.width > 60px ? root.chip-w + 4px : 0px);
+            y: (parent.height - self.height) / 2;
+            width: root.code-w;
+            height: root.chip;
+            border-radius: Theme.r-xs;
+            background: Theme.clip-chip;
+
+            Text {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                height: parent.height;
+                text: "</>";
+                color: Theme.clip-ink;
+                font-size: Math.max(9px, root.chip * 0.55);
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
         }
 
         // An `fx` chip when effects are live on the clip, so a styled clip is
@@ -1221,6 +1247,25 @@ export component Lanes inherits Rectangle {
     /// says so, and only its own token moves.
     property <bool> asked;
     property <int> own-token;
+    /// The keyboard's way to a clip's menu: opened at the clip, through the
+    /// same round trip as a right-click on it.
+    in property <int> key-menu-token;
+    in property <string> key-menu-clip;
+    in property <float> key-menu-start;
+    in property <int> key-menu-row;
+    /// The open menu came from the keyboard: it takes the keys, so the
+    /// arrows and Return pick a row.
+    property <bool> keyed;
+    changed key-menu-token => {
+        if (root.key-menu-clip == "" || root.key-menu-row >= root.tracks.length) {
+            return;
+        }
+        menu.request-x = Math.clamp(root.at(root.key-menu-start) + 12px, 0px, root.width);
+        menu.request-y = root.row-y(root.key-menu-row) + 16px;
+        root.keyed = true;
+        root.asked = true;
+        root.clip-context(root.key-menu-clip);
+    }
     changed menu-token => {
         if (root.asked) {
             root.asked = false;
@@ -1654,6 +1699,7 @@ export component Lanes inherits Rectangle {
                 // returns, so the token can arrive inside it.
                 menu.request-x = wheel.mouse-x;
                 menu.request-y = wheel.mouse-y;
+                root.keyed = false;
                 root.asked = true;
                 root.clip-context(entry.id);
             }
@@ -1936,6 +1982,7 @@ export component Lanes inherits Rectangle {
             items: root.menu-items;
             menu-height: root.menu-height;
             token: root.own-token;
+            keyboard: root.keyed;
             selected(id) => { root.menu-selected(id); }
         }
 

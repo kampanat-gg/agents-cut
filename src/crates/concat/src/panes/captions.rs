@@ -145,7 +145,7 @@ impl CaptionsPane {
             CaptionsMsg::OpenOnClip(id) => self.open_on(studio, Some(id), true),
             CaptionsMsg::Close => self.open = false,
             CaptionsMsg::VoiceToggled(on) => {
-                self.from_voice = on;
+                self.from_voice = on && cfg!(feature = "speech");
                 self.message.clear();
                 let sources = sources(studio);
                 if on
@@ -301,11 +301,6 @@ impl CaptionsPane {
             .as_ref()
             .map(|session| PathBuf::from(session.path()))
             .unwrap_or_else(|| PathBuf::from(crate::studio::home_folder("Documents")));
-        if cfg!(any(target_os = "android", target_os = "ios")) {
-            let path = unique_path(&folder, &name);
-            self.export_srt(studio, &path);
-            return;
-        }
         let title = t("captions.exportSrt");
         let family = t("captions.subRipSubtitles");
         crate::host::after_dialog(
@@ -356,39 +351,15 @@ impl CaptionsPane {
         // selected title's, or the only lane with titles; otherwise the
         // notice says it was the busiest, and how to pick another.
         let busiest = lane.busiest && srt::title_lanes(studio.timeline()) > 1;
-        let say = move |studio: &mut Studio, place: &str| {
-            // Each key spelled out where it is used: scripts/locales.py
-            // finds the strings the source asks for by reading it.
-            let said = if busiest {
-                tf("captions.exportedBusiestLane", &[&count, &place])
-            } else {
-                tf("captions.exportedCaptions", &[&count, &place])
-            };
-            studio.notify(&said, false);
+        let place = path.display().to_string();
+        // Each key spelled out where it is used: scripts/locales.py finds
+        // the strings the source asks for by reading it.
+        let said = if busiest {
+            tf("captions.exportedBusiestLane", &[&count, &place])
+        } else {
+            tf("captions.exportedCaptions", &[&count, &place])
         };
-        let written = path.to_path_buf();
-        let handed = crate::platform::publish_document(
-            path.to_path_buf(),
-            "application/x-subrip",
-            move |result| {
-                crate::host::on_ui(move |studio, _, _| match result {
-                    Ok(place) => say(studio, &place),
-                    Err(error) => {
-                        log::warn!("captions: could not publish {}: {error}", written.display());
-                        studio.notify(
-                            &tf(
-                                "captions.couldNotPublishSubtitles",
-                                &[&written.display(), &error],
-                            ),
-                            true,
-                        );
-                    }
-                });
-            },
-        );
-        if !handed {
-            say(studio, &path.display().to_string());
-        }
+        studio.notify(&said, false);
     }
 
     /// The sheet opened afresh. `clip` is the clip it was opened on, if
@@ -400,7 +371,9 @@ impl CaptionsPane {
         let model = installed.iter().position(|model| model.active).unwrap_or(0);
         let sources = sources(studio);
         let sounding = clip.filter(|id| sources.iter().any(|source| &source.id == id));
-        let from_voice = voice || sounding.is_some();
+        // A build with no transcriber has the script alone, whatever the
+        // sheet was opened on.
+        let from_voice = cfg!(feature = "speech") && (voice || sounding.is_some());
         let clip = sounding.or_else(|| {
             from_voice
                 .then(|| sources.first().map(|source| source.id.clone()))
@@ -656,23 +629,6 @@ fn file_stem(studio: &Studio) -> String {
     }
 }
 
-/// `name` in `dir`, or `name (2)`, `name (3)`... until nothing there is
-/// written over.
-fn unique_path(dir: &Path, name: &str) -> PathBuf {
-    let first = dir.join(name);
-    if !first.exists() {
-        return first;
-    }
-    let (stem, ext) = match name.rfind('.') {
-        Some(dot) if dot > 0 => (&name[..dot], &name[dot..]),
-        _ => (name, ""),
-    };
-    (2..)
-        .map(|n| dir.join(format!("{stem} ({n}){ext}")))
-        .find(|path| !path.exists())
-        .unwrap_or(first)
-}
-
 /// [`CaptionsPane::subject_clip`] with the studio taken out: `selected`
 /// the sole selection, `chosen_with` the selection when `clip` was chosen,
 /// and `sounds` whether a clip is on the timeline with sound.
@@ -758,11 +714,15 @@ fn caption_clip(
             runs: Vec::new(),
             ..base.clone()
         },
+        // Kanit, bold, with a thin dark outline over the shadow: legible
+        // in Thai and Latin over any picture.
         None => TextStyle {
             content: text,
-            font_family: "Hanken Grotesk".to_owned(),
+            font_family: concat_text::CAPTION_FAMILY.to_owned(),
             font_size,
             font_weight: 600.0,
+            stroke_width: 0.004,
+            stroke_color: "#000000".to_owned(),
             ..TextStyle::default()
         },
     };

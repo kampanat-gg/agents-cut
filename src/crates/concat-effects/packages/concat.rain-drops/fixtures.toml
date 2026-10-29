@@ -1,0 +1,19 @@
+# Colours in the working space: linear light. At its least the element
+# draws nothing, so the picture passes through untouched.
+
+[[probe]]
+name = "minimum"
+at = "min"
+input = [0.3, 0.2, 0.12, 1]
+expect = [0.3, 0.2, 0.12, 1]
+
+[[probe]]
+name = "default"
+input = [0.3, 0.2, 0.12, 1]
+expect = [0.27832, 0.18555, 0.11133, 1]
+
+[[probe]]
+name = "maximum"
+at = "max"
+input = [0.3, 0.2, 0.12, 1]
+expect = [0.26562, 0.17786, 0.10767, 1]

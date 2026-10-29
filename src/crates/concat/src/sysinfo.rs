@@ -117,7 +117,10 @@ pub fn system_facts() -> Vec<(String, String)> {
     // but background removal, the smart brushes, Enhance and Chatterbox
     // (#333). Each says so when asked; this says it once, where a person
     // looks to see what their machine can do, and in the report they paste.
-    if let Some(why) = concat_vision::onnx::unavailable() {
+    // A build without ONNX Runtime has none of them to lose.
+    if cfg!(any(feature = "speech", feature = "vision-ai"))
+        && let Some(why) = concat_vision::onnx::unavailable()
+    {
         facts.push((
             t("sysinfo.aiFeatures"),
             tf("sysinfo.aiNeedsMacos", &[&why.needs]),

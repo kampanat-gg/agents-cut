@@ -261,6 +261,15 @@ impl log::Log for Logger {
         if metadata.level() > log::max_level() {
             return false;
         }
+        // The SVG drawers' warnings are about a file's contents - a circle
+        // of no size, a dash too short to draw - and a code clip has them
+        // once a frame, a hundred lines for nothing; their errors still show.
+        let drawer = ["usvg", "resvg", "tiny_skia"]
+            .iter()
+            .any(|name| metadata.target().starts_with(name));
+        if drawer && !firehose() && metadata.level() > log::Level::Error {
+            return false;
+        }
         // Concat's own lines at the level asked for; the crates underneath
         // at warnings and up, unless the environment asked for everything.
         own(metadata.target()) || firehose() || metadata.level() <= log::Level::Warn

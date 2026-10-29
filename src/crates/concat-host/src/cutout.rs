@@ -22,16 +22,28 @@
 //! One job at a time through a [`SingleFlight`], like every long job the
 //! host runs; the window queues the next media behind it. A model loads
 //! on first use and stays loaded.
+//!
+//! The models run in ONNX Runtime, which is behind the `infer` feature: a
+//! build without it still knows which media want masks and still cuts with
+//! the masks already on disk, but [`Cutouts::analyse`] says it cannot find
+//! new ones rather than carrying eighty megabytes of runtime for them.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, Mutex, OnceLock};
+#[cfg(feature = "infer")]
+use std::sync::{Mutex, OnceLock};
 
+#[cfg(feature = "infer")]
 use concat_core::time::{FrameRate, Rational};
+#[cfg(feature = "infer")]
 use concat_media::{DecodeOptions, Decoder, FrameSource};
 use concat_project::model::{MediaKind, Project, Subject};
+#[cfg(feature = "infer")]
 use concat_vision::segment::Kind;
-use concat_vision::{MASK_RATE, MaskStore, ModelId, Segmenter, mask_dir, models};
+#[cfg(feature = "infer")]
+use concat_vision::{MASK_RATE, Segmenter};
+use concat_vision::{MaskStore, ModelId, mask_dir, models};
 
 use crate::jobs::{SingleFlight, Tripwire};
 
@@ -73,8 +85,11 @@ pub struct Cutouts {
     gate: Arc<SingleFlight>,
     /// The app's data directory, where downloaded models live.
     data: PathBuf,
+    #[cfg(feature = "infer")]
     selfie: OnceLock<Result<Arc<Segmenter>, String>>,
+    #[cfg(feature = "infer")]
     person: Mutex<Option<Arc<Segmenter>>>,
+    #[cfg(feature = "infer")]
     object: Mutex<Option<Arc<Segmenter>>>,
 }
 
@@ -84,10 +99,19 @@ impl Cutouts {
         Cutouts {
             gate: Arc::new(SingleFlight::new()),
             data: data.to_path_buf(),
+            #[cfg(feature = "infer")]
             selfie: OnceLock::new(),
+            #[cfg(feature = "infer")]
             person: Mutex::new(None),
+            #[cfg(feature = "infer")]
             object: Mutex::new(None),
         }
+    }
+
+    /// Whether this build can find masks at all: false without the
+    /// `infer` feature, where [`Cutouts::analyse`] only says so.
+    pub const fn can_analyse() -> bool {
+        cfg!(feature = "infer")
     }
 
     /// Whether an analysis is running.
@@ -105,6 +129,7 @@ impl Cutouts {
         models::installed(&self.data, id)
     }
 
+    #[cfg(feature = "infer")]
     fn selfie(&self) -> Result<Arc<Segmenter>, String> {
         self.selfie
             .get_or_init(|| Segmenter::selfie().map(Arc::new))
@@ -112,6 +137,7 @@ impl Cutouts {
     }
 
     /// The person or object model, fetched first when it is not on disk.
+    #[cfg(feature = "infer")]
     fn downloaded(
         &self,
         id: ModelId,
@@ -140,6 +166,7 @@ impl Cutouts {
 
     /// The person model, or the compiled-in one when the download cannot
     /// happen: a cutout with no network is a worse cutout, not none.
+    #[cfg(feature = "infer")]
     fn person_or_selfie(
         &self,
         cancel: &AtomicBool,
@@ -233,9 +260,21 @@ impl Cutouts {
         missing(&store, &request.ranges).len()
     }
 
+    /// Fills the masks `request` is missing: in a build without the
+    /// models, nothing to fill them with, said as an error.
+    #[cfg(not(feature = "infer"))]
+    pub fn analyse(
+        &self,
+        _request: &AnalyseRequest,
+        _progress: &mut dyn FnMut(Progress),
+    ) -> Result<usize, String> {
+        Err("background removal is not part of this build".to_owned())
+    }
+
     /// Fills the masks `request` is missing. Blocks for the whole run, so
     /// run it on its own thread; `progress` is called as it goes. Returns
     /// how many masks were written.
+    #[cfg(feature = "infer")]
     pub fn analyse(
         &self,
         request: &AnalyseRequest,
@@ -388,13 +427,16 @@ impl Cutouts {
 /// truncated or substituted file never becomes an installed model.
 ///
 /// Nothing is fetched for a runtime that cannot run it: an Intel Mac older
-/// than its ONNX Runtime is told so here, before the download.
+/// than its ONNX Runtime is told so here, before the download. A build
+/// without the runtime fetches Enhance's model all the same, which runs on
+/// the GPU in shaders of its own.
 pub(crate) fn fetch(
     id: ModelId,
     file: &Path,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(Progress),
 ) -> Result<(), String> {
+    #[cfg(feature = "infer")]
     concat_vision::runtime::ready()?;
     let spec = id.spec();
     if let Some(parent) = file.parent() {
@@ -437,6 +479,7 @@ fn missing(store: &MaskStore, ranges: &[(f64, f64)]) -> Vec<u64> {
 }
 
 /// The instants split into runs a step apart.
+#[cfg(any(feature = "infer", test))]
 fn runs(instants: &[u64], step: u64) -> Vec<Vec<u64>> {
     let mut out: Vec<Vec<u64>> = Vec::new();
     for &at in instants {

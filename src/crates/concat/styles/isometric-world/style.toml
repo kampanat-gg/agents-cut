@@ -1,0 +1,28 @@
+# A style: what a new project made with it starts as. The folder's
+# CLAUDE.md is copied into the project, where the agent reads it.
+
+name = "Isometric world"
+name_th = "เมืองจำลอง isometric"
+description = "How a city, country or system works, shown as a living isometric diorama with big numbers."
+description_th = "อธิบายว่าเมือง ประเทศ หรือระบบทำงานยังไง ด้วยแบบจำลอง isometric ที่มีชีวิต และตัวเลขใหญ่ๆ"
+aspect = "9:16"
+
+[[starters]]
+label = "New episode about a place"
+label_th = "ทำตอนใหม่เกี่ยวกับสถานที่"
+prompt = "Make a new episode about this place: "
+prompt_th = "ทำตอนใหม่เกี่ยวกับสถานที่: "
+fill = true
+
+[[starters]]
+label = "Explain how something works"
+label_th = "อธิบายว่าสิ่งนี้ทำงานยังไง"
+prompt = "Make a new episode explaining how this works: "
+prompt_th = "ทำตอนใหม่อธิบายว่าสิ่งนี้ทำงานยังไง: "
+fill = true
+
+[[starters]]
+label = "Write 5 hooks"
+label_th = "คิด hook 5 แบบ"
+prompt = "Write 5 hook options for the episode on the active timeline. Do not edit anything yet."
+prompt_th = "คิด hook 5 แบบสำหรับตอนใน timeline ที่เปิดอยู่ ยังไม่ต้องแก้อะไร"

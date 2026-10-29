@@ -36,13 +36,21 @@
 //!    `audio/` folder (not `cache/` - cache is regenerable, narration the
 //!    user placed on the timeline is not) and returns its path for the
 //!    caller to import like any other media file.
+//!
+//! The engines are behind the `voices` feature (and Chatterbox behind its
+//! own on top). Without it the tables, the types and the settings' status
+//! are all here, and [`Speech::speak`] answers that voices are not part of
+//! this build.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
-use concat_host::{AppDirs, SingleFlight, projects};
+#[cfg(feature = "voices")]
+use concat_host::projects;
+use concat_host::{AppDirs, SingleFlight};
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "voices")]
 use sherpa_onnx::{
     GenerationConfig, OfflineTts, OfflineTtsConfig, OfflineTtsKokoroModelConfig,
     OfflineTtsModelConfig, OfflineTtsPocketModelConfig,
@@ -236,6 +244,7 @@ pub fn voice_family(voice: i32) -> Option<Family> {
 }
 
 /// The upstream name of a voice, in either family.
+#[cfg(any(feature = "voices", test))]
 fn voice_name(voice: i32) -> Option<&'static str> {
     VOICES
         .iter()
@@ -414,11 +423,14 @@ pub struct SpeakResult {
 /// A loaded model: sherpa's engine for the families it runs, or
 /// Chatterbox's own.
 enum Engine {
+    #[cfg(feature = "voices")]
     Sherpa(OfflineTts),
     #[cfg(feature = "chatterbox")]
     Chatterbox(Box<crate::chatterbox::Engine>),
 }
 
+/// Never made in a build without voices, where nothing loads.
+#[cfg_attr(not(feature = "voices"), allow(dead_code))]
 struct CachedEngine {
     model_id: String,
     tts: Engine,
@@ -527,6 +539,7 @@ pub struct Speech {
     /// The models the accelerator failed to run this session: loaded for
     /// the CPU from then on, rather than tried there and failed again each
     /// time one is loaded.
+    #[cfg_attr(not(feature = "voices"), allow(dead_code))]
     on_cpu: Mutex<std::collections::HashSet<String>>,
 }
 
@@ -560,7 +573,8 @@ impl Speech {
                     label: model.label.to_owned(),
                     blurb: model.blurb.to_owned(),
                     size_bytes: model.approx_bytes,
-                    downloaded: model_downloaded(dirs, model.id),
+                    // A bundle this build cannot read is not one it has.
+                    downloaded: cfg!(feature = "voices") && model_downloaded(dirs, model.id),
                 })
                 .collect(),
             voices: VOICES
@@ -606,6 +620,9 @@ impl Speech {
         id: &str,
         mut progress: impl FnMut(DownloadProgress),
     ) -> Result<(), String> {
+        if !cfg!(feature = "voices") {
+            return Err("voices are not part of this build".to_owned());
+        }
         let job = self.downloads.begin("voice model download")?;
         let cancel = job.cancel_flag();
         let destination = model_dir(dirs, id)?;
@@ -737,6 +754,7 @@ impl Speech {
     /// each stage as it begins, and in the reading itself how far it is:
     /// Chatterbox's as it writes, Kokoro's and Pocket's as each sentence
     /// is done.
+    #[cfg(feature = "voices")]
     pub fn speak(
         &self,
         dirs: &AppDirs,
@@ -1051,6 +1069,18 @@ impl Speech {
         })
     }
 
+    /// Synthesizes one narration clip: in a build without voices, nothing
+    /// to read it with, said as an error.
+    #[cfg(not(feature = "voices"))]
+    pub fn speak(
+        &self,
+        _dirs: &AppDirs,
+        _request: &SpeakRequest,
+        _progress: impl FnMut(JobStage) + Send + 'static,
+    ) -> Result<SpeakResult, String> {
+        Err("voices are not part of this build".to_owned())
+    }
+
     /// Asks the running synthesis to stop at the next sentence boundary.
     pub fn cancel(&self) {
         self.gate.cancel();
@@ -1064,11 +1094,13 @@ impl Speech {
 
 /// What Pocket TTS listens to a voice at: the rate of its own codec, and
 /// the rate its bundled recordings are in.
+#[cfg(any(feature = "voices", test))]
 const REFERENCE_RATE: u32 = 24_000;
 
 /// Where the stock recordings are: the Pocket bundle. An error naming the
 /// fix when it is not on disk, since a Chatterbox voice borrowed from it
 /// can be asked for without Pocket ever having been downloaded.
+#[cfg(feature = "voices")]
 fn recordings_dir(dirs: &AppDirs) -> Result<PathBuf, String> {
     if !model_downloaded(dirs, POCKET_ID) {
         return Err(
@@ -1089,6 +1121,7 @@ const CHATTERBOX_STEP: f32 = 0.02;
 /// with words in them between full stops, question and exclamation marks
 /// (and their CJK forms) and line breaks. An estimate, for a bar, of how
 /// sherpa will split it.
+#[cfg(any(feature = "voices", test))]
 fn sentences(text: &str) -> usize {
     text.split(['.', '!', '?', '。', '！', '？', '\n'])
         .filter(|sentence| sentence.chars().any(char::is_alphanumeric))
@@ -1100,6 +1133,7 @@ fn sentences(text: &str) -> usize {
 /// [`REFERENCE_RATE`]: one of the stock recordings in `dir` for a named
 /// voice, or the request's reference for a chosen one, cut to
 /// [`REFERENCE_SECONDS`] from where the voice is heard.
+#[cfg(any(feature = "voices", test))]
 fn reference_samples(dir: &Path, request: &SpeakRequest) -> Result<Vec<f32>, String> {
     let (path, start) = if is_clone(request.voice) {
         let reference = request.reference.as_ref().ok_or_else(|| {
@@ -1159,6 +1193,7 @@ fn reference_samples(dir: &Path, request: &SpeakRequest) -> Result<Vec<f32>, Str
 
 /// The file in `dir` whose name starts with `prefix` and ends `.onnx`:
 /// `lm_main.onnx` in a full bundle, `lm_main.int8.onnx` in a quantised one.
+#[cfg(any(feature = "voices", test))]
 fn onnx_starting(dir: &Path, prefix: &str) -> Option<String> {
     let mut found: Vec<PathBuf> = std::fs::read_dir(dir)
         .ok()?
@@ -1180,6 +1215,7 @@ fn onnx_starting(dir: &Path, prefix: &str) -> Option<String> {
 
 /// Builds the engine for a Pocket TTS bundle: the five networks and the
 /// two tables the sherpa-onnx example names.
+#[cfg(feature = "voices")]
 fn load_pocket(dir: &Path, accelerated: bool) -> Result<OfflineTts, String> {
     let part = |prefix: &str| {
         onnx_starting(dir, prefix)
@@ -1219,6 +1255,7 @@ fn load_pocket(dir: &Path, accelerated: bool) -> Result<OfflineTts, String> {
 /// otherwise, and the CPU when the load for CoreML failed. sherpa falls back to the CPU
 /// itself, with a line in the log, where its runtime was built without
 /// the one asked for.
+#[cfg(feature = "voices")]
 fn provider(accelerated: bool) -> &'static str {
     if accelerated && cfg!(target_os = "macos") {
         "coreml"
@@ -1228,6 +1265,7 @@ fn provider(accelerated: bool) -> &'static str {
 }
 
 /// The threads the engine may use: every core up to eight.
+#[cfg(feature = "voices")]
 fn threads() -> i32 {
     std::thread::available_parallelism()
         .map(|count| count.get().min(8))
@@ -1238,6 +1276,7 @@ fn threads() -> i32 {
 ///
 /// The lexicon list mirrors the official sherpa-onnx invocation for this
 /// bundle: US English and Chinese, joined by commas, each only if present.
+#[cfg(feature = "voices")]
 fn load_kokoro(dir: &Path, accelerated: bool) -> Result<OfflineTts, String> {
     let network = onnx_file(dir)
         .ok_or_else(|| "the model folder has no .onnx network - re-download it".to_owned())?;
